@@ -50,13 +50,13 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
     <header className="sticky top-0 z-[100] bg-surface/95 backdrop-blur-sm border-b border-line">
       <nav
         aria-label="Primary"
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4"
+        className="max-w-[96rem] mx-auto px-4 sm:px-6 lg:px-8 h-16 grid grid-cols-[1fr_auto] xl:grid-cols-[1fr_auto_1fr] items-center gap-4"
       >
         {/* Brand */}
         <button
           type="button"
           onClick={() => go(HOME_TABS.home)}
-          className="flex items-center gap-3 cursor-pointer text-left"
+          className="justify-self-start flex items-center gap-3 cursor-pointer text-left"
           aria-label="TrojanMind home"
         >
           <span className="brand-mark" aria-hidden="true">TM</span>
@@ -69,7 +69,7 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
         </button>
 
         {/* Desktop nav */}
-        <div className="hidden xl:flex items-center gap-1">
+        <div className="hidden xl:flex items-center justify-center gap-0.5">
           {navItems.map((item) => {
             const active = isActive(item, activeTab);
             return (
@@ -78,20 +78,20 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                 type="button"
                 onClick={() => go(item.index)}
                 aria-current={active ? 'page' : undefined}
-                className={`relative px-3 py-2 rounded-md text-sm font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                className={`relative px-2.5 py-2 rounded-md text-sm font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                   active ? 'text-cardinal' : 'text-muted hover:text-ink hover:bg-sunken'
                 }`}
               >
                 {item.label}
                 {active && (
-                  <span className="absolute left-3 right-3 -bottom-[13px] h-0.5 bg-cardinal rounded-full" aria-hidden="true" />
+                  <span className="absolute left-2.5 right-2.5 -bottom-[13px] h-0.5 bg-cardinal rounded-full" aria-hidden="true" />
                 )}
               </button>
             );
           })}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="justify-self-end flex items-center gap-2">
           <BrightspacePill status={bs} onClick={() => go(HOME_TABS.courses)} />
 
           <button
@@ -111,7 +111,7 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             aria-label="Log out"
           >
             <LogOut size={16} aria-hidden="true" />
-            <span className="hidden sm:inline">{signingOut ? 'Logging out…' : 'Log out'}</span>
+            <span className="hidden sm:inline xl:hidden 2xl:inline">{signingOut ? 'Logging out…' : 'Log out'}</span>
           </button>
 
           {/* Mobile menu toggle */}
@@ -202,7 +202,6 @@ const BrightspacePill: React.FC<{ status: ReturnType<typeof useBrightspace>['sta
       className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-semibold cursor-pointer ${cls}`}
     >
       {icon}
-      <span className="hidden 2xl:inline whitespace-nowrap">{label}</span>
     </button>
   );
 };
