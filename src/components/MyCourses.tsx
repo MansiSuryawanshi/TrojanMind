@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { AlertTriangle, BookOpen, CheckCircle2, ChevronRight, Clock, Laptop, Loader2, RefreshCw, Smartphone } from 'lucide-react';
+import { AlertTriangle, BookOpen, CheckCircle2, ChevronRight, Clock, KeyRound, Laptop, Link2, Loader2, RefreshCw, ShieldCheck, Smartphone, Upload } from 'lucide-react';
 import CourseDetail from './CourseDetail';
 import { useAuth } from '../auth/useAuth';
 import { useBrightspace } from '../brightspace/useBrightspace';
-import type { Course } from '../brightspace/brightspaceContext';
+import { LOCAL_DEMO_LABEL, type ConnectionState, type Course } from '../brightspace/brightspaceContext';
 import { groupCoursesBySemester } from '../brightspace/semesters';
 
 function formatDate(iso: string | null): string | null {
@@ -21,11 +21,130 @@ const Badge: React.FC<{ tone: 'success' | 'muted' | 'warning'; children: React.R
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-semibold ${cls}`}>{children}</span>;
 };
 
-const MyCourses: React.FC = () => {
+const STATE_BADGE: Record<ConnectionState, { label: string; cls: string }> = {
+  not_connected: { label: 'Not connected', cls: 'bg-sunken text-muted border-line' },
+  connecting: { label: 'Connecting', cls: 'bg-sunken text-muted border-line' },
+  connected: { label: 'Connected', cls: 'bg-success-soft text-success border-success/25' },
+  expired: { label: 'Expired', cls: 'bg-gold-soft text-gold-ink border-gold/60' },
+  error: { label: 'Error', cls: 'bg-danger-soft text-danger border-danger/30' },
+};
+
+const StateBadge: React.FC<{ state: ConnectionState }> = ({ state }) => {
+  const b = STATE_BADGE[state];
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${b.cls}`}>
+      {state === 'connected' && <CheckCircle2 size={14} aria-hidden="true" />}
+      {b.label}
+    </span>
+  );
+};
+
+const UploadPrompt: React.FC<{ onUpload: () => void }> = ({ onUpload }) => (
+  <section
+    aria-labelledby="add-own-material"
+    className="mt-4 rounded-2xl border border-dashed border-line-strong bg-surface/60 px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4"
+  >
+    <div className="w-9 h-9 rounded-lg bg-cardinal-soft text-cardinal flex items-center justify-center shrink-0" aria-hidden="true">
+      <Upload size={18} />
+    </div>
+    <div className="flex-1 text-sm text-muted leading-relaxed">
+      <p id="add-own-material" className="font-semibold text-ink mb-0.5">Want to practice on this material?</p>
+      Reasoning challenges are generated from text you add to TrojanMind. Brightspace selections are saved as
+      links only, so paste or upload the content you want to be quizzed on, including notes that aren’t on Brightspace.
+    </div>
+    <button type="button" onClick={onUpload} className="btn-secondary px-4 py-2.5 rounded-lg text-sm font-semibold shrink-0">
+      Add your own material
+    </button>
+  </section>
+);
+
+const MyCourses: React.FC<{ onUpload?: () => void }> = ({ onUpload }) => {
+  const { connection, status } = useBrightspace();
+
+  if (connection.resolving) {
+    return (
+      <Shell>
+        <div className="surface rounded-2xl p-8 mt-6 flex flex-col items-center gap-3 text-center" role="status">
+          <div className="spinner" aria-hidden="true" />
+          <p className="font-semibold text-ink">Checking your Brightspace connection…</p>
+        </div>
+      </Shell>
+    );
+  }
+
+  // On the deployed site there is no local connector, so an unreachable
+  // connector just means this user needs an individual connection.
+  const deployedWithoutConnector = !import.meta.env.DEV && connection.method === null && status.kind === 'error' && status.code === 'unreachable';
+  if (connection.method === 'individual' || deployedWithoutConnector) {
+    return (
+      <Shell badge={<StateBadge state="not_connected" />}>
+        <IndividualConnectionPanel />
+        {onUpload && <UploadPrompt onUpload={onUpload} />}
+      </Shell>
+    );
+  }
+
+  return <LocalDemoCourses onUpload={onUpload} />;
+};
+
+const Shell: React.FC<{ badge?: React.ReactNode; children: React.ReactNode }> = ({ badge, children }) => (
+  <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <p className="eyebrow mb-2">Brightspace</p>
+    <div className="flex flex-wrap items-center gap-3">
+      <h1 className="text-3xl font-extrabold tracking-tight text-ink">My Courses</h1>
+      {badge}
+    </div>
+    {children}
+  </div>
+);
+
+/**
+ * Per-user Brightspace connection. Shown to everyone except the configured
+ * local demo owner. Not available yet: there is no registered Brightspace
+ * OAuth app, so nothing here starts a sign-in or reports a connection.
+ */
+const IndividualConnectionPanel: React.FC = () => (
+  <section aria-labelledby="connect-own-brightspace" className="surface rounded-2xl p-6 mt-6">
+    <div className="flex flex-col sm:flex-row sm:items-start gap-5">
+      <div className="w-11 h-11 rounded-xl bg-cardinal-soft text-cardinal flex items-center justify-center shrink-0" aria-hidden="true">
+        <Link2 size={22} />
+      </div>
+      <div className="flex-1 min-w-0 text-sm text-muted leading-relaxed">
+        <h2 id="connect-own-brightspace" className="font-semibold text-ink text-base mb-1">Connect your Brightspace account</h2>
+        <p>
+          Individual Brightspace connections aren’t available yet. They need an official Brightspace integration
+          approved by USC, which TrojanMind doesn’t have yet. Until then, your Brightspace courses can’t be loaded here.
+        </p>
+        <ul className="mt-3 grid gap-2">
+          <li className="flex items-start gap-2">
+            <ShieldCheck size={16} className="text-success shrink-0 mt-0.5" aria-hidden="true" />
+            <span>When it’s ready, you’ll sign in on Brightspace’s own page and approve access there.</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <KeyRound size={16} className="text-success shrink-0 mt-0.5" aria-hidden="true" />
+            <span>TrojanMind will never ask for your USC password, and never ask you to paste cookies or tokens.</span>
+          </li>
+        </ul>
+      </div>
+      <button
+        type="button"
+        disabled
+        aria-describedby="connect-own-brightspace"
+        className="btn-primary px-5 py-3 rounded-lg font-semibold shrink-0"
+      >
+        Not available yet
+      </button>
+    </div>
+  </section>
+);
+
+/** The owner-only local demo connector: unchanged behavior, clearly labeled. */
+const LocalDemoCourses: React.FC<{ onUpload?: () => void }> = ({ onUpload }) => {
   const { user } = useAuth();
-  const { status, connect, selections } = useBrightspace();
+  const { connection, status, connect, selections } = useBrightspace();
   const busy = status.kind === 'connecting';
   const [open, setOpen] = useState<{ course: Course; semesterLabel: string } | null>(null);
+  const isLocalDemo = connection.method === 'local_demo';
 
   const backToList = () => {
     setOpen(null);
@@ -48,11 +167,7 @@ const MyCourses: React.FC = () => {
       <p className="eyebrow mb-2">Brightspace</p>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-3xl font-extrabold tracking-tight text-ink">My Courses</h1>
-        {status.kind === 'connected' && (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success-soft text-success text-xs font-bold border border-success/25">
-            <CheckCircle2 size={14} aria-hidden="true" /> Connected
-          </span>
-        )}
+        {isLocalDemo && <StateBadge state={connection.state} />}
       </div>
 
       {/* Explainer + action */}
@@ -61,16 +176,21 @@ const MyCourses: React.FC = () => {
           <Laptop size={22} />
         </div>
         <div className="flex-1 text-sm text-muted leading-relaxed">
-          <p className="font-semibold text-ink text-base mb-1">Uses the Brightspace sign-in on this computer</p>
-          TrojanMind connects through the local Brightspace connector set up on this computer and loads your
+          <p className="font-semibold text-ink text-base mb-1 flex flex-wrap items-center gap-2">
+            {LOCAL_DEMO_LABEL}
+            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-gold-soft text-gold-ink text-[11px] font-bold">Owner only</span>
+          </p>
+          Uses the Brightspace sign-in on this computer. TrojanMind connects through the local Brightspace connector set up on this computer and loads your
           courses automatically after you log in. TrojanMind never asks for your USC password; only course
           names, codes, IDs, and access status are shown here.
         </div>
-        <button type="button" onClick={connect} disabled={busy} className="btn-primary px-5 py-3 rounded-lg font-semibold shrink-0">
+        <button type="button" onClick={connect} disabled={busy}className="btn-primary px-5 py-3 rounded-lg font-semibold shrink-0">
           {busy ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : status.kind === 'connected' ? <RefreshCw size={16} aria-hidden="true" /> : null}
           {buttonLabel}
         </button>
       </section>
+
+      {onUpload && <UploadPrompt onUpload={onUpload} />}
 
       <div className="mt-6" aria-live="polite">
         {(status.kind === 'connecting' || status.kind === 'idle') && (
@@ -91,7 +211,9 @@ const MyCourses: React.FC = () => {
                 : <Clock size={20} className="text-gold-ink shrink-0 mt-0.5" aria-hidden="true" />}
               <div className="flex-1 min-w-0">
                 <p className="font-bold text-gold-ink">
-                  {status.kind === 'action_required' ? 'Action needed to finish connecting to Brightspace' : 'Still connecting to Brightspace'}
+                  {connection.state === 'expired'
+                    ? 'Your Brightspace connection expired'
+                    : status.kind === 'action_required' ? 'Action needed to finish connecting to Brightspace' : 'Still connecting to Brightspace'}
                 </p>
                 <p className="text-sm text-ink mt-1 leading-relaxed break-words">{status.message}</p>
                 <button type="button" onClick={connect} className="btn-primary mt-4 px-4 py-2 rounded-lg text-sm font-semibold">
@@ -231,6 +353,16 @@ const ErrorPanel: React.FC<{ code: string; message: string; uid: string; onRetry
     );
   } else if (code === 'not_owner') {
     title = 'Brightspace not available for this account';
+    canRetry = false;
+  } else if (code === 'not_found') {
+    // The connector answered but has no /connections route: it predates this version.
+    title = 'Local connector needs a restart';
+    detail = (
+      <>
+        The running connector is an older version. Stop it and run <code className="font-mono text-ink">npm run server</code> (or{' '}
+        <code className="font-mono text-ink">npm run dev</code>) again, then reload this page.
+      </>
+    );
     canRetry = false;
   } else if (code === 'connector_not_configured') {
     title = 'Local connector setup incomplete';

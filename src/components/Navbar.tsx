@@ -8,15 +8,20 @@ interface NavbarProps {
   setActiveTab: (tab: number) => void;
 }
 
+// Upload (tab 1) is intentionally not a top-level item: it's the secondary way to
+// add material, reached from My Courses, the homepage, and the Challenge page.
+// While on it, "My Courses" stays highlighted as the materials section.
 const navItems = [
   { label: 'Home', index: 0 },
-  { label: 'Upload', index: 1 },
+  { label: 'My Courses', index: 6, alsoActiveFor: [1] },
   { label: 'Challenge', index: 2 },
   { label: 'Exam Prep', index: 3 },
   { label: 'Study Schedule', index: 4 },
   { label: 'Study Report', index: 5 },
-  { label: 'My Courses', index: 6 },
 ];
+
+const isActive = (item: { index: number; alsoActiveFor?: number[] }, activeTab: number) =>
+  activeTab === item.index || (item.alsoActiveFor?.includes(activeTab) ?? false);
 
 const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -54,23 +59,23 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
           <span className="brand-mark" aria-hidden="true">TM</span>
           <span className="flex flex-col leading-none">
             <span className="text-lg font-extrabold tracking-tight text-cardinal">TrojanMind</span>
-            <span className="hidden sm:block text-[11px] font-medium text-muted mt-1">
+            <span className="hidden sm:block xl:hidden 2xl:block whitespace-nowrap text-[11px] font-medium text-muted mt-1">
               Learn together. Reason deeper.
             </span>
           </span>
         </button>
 
         {/* Desktop nav */}
-        <div className="hidden lg:flex items-center gap-1">
+        <div className="hidden xl:flex items-center gap-1">
           {navItems.map((item) => {
-            const active = activeTab === item.index;
+            const active = isActive(item, activeTab);
             return (
               <button
                 key={item.index}
                 type="button"
                 onClick={() => go(item.index)}
                 aria-current={active ? 'page' : undefined}
-                className={`relative px-3 py-2 rounded-md text-sm font-semibold transition-colors cursor-pointer ${
+                className={`relative px-3 py-2 rounded-md text-sm font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                   active ? 'text-cardinal' : 'text-muted hover:text-ink hover:bg-sunken'
                 }`}
               >
@@ -88,8 +93,8 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
 
           <button
             type="button"
-            onClick={() => go(1)}
-            className="btn-primary px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold"
+            onClick={() => go(6)}
+            className="btn-primary px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap"
           >
             Get Started
           </button>
@@ -99,7 +104,7 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             onClick={handleSignOut}
             disabled={signingOut}
             title={user?.email ? `Signed in as ${user.email}` : undefined}
-            className="btn-secondary px-3 py-2 rounded-lg text-sm font-semibold"
+            className="btn-secondary px-3 py-2 rounded-lg text-sm font-semibold whitespace-nowrap"
             aria-label="Log out"
           >
             <LogOut size={16} aria-hidden="true" />
@@ -109,7 +114,7 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
           {/* Mobile menu toggle */}
           <button
             type="button"
-            className="lg:hidden p-2 rounded-lg text-ink hover:bg-sunken cursor-pointer"
+            className="xl:hidden p-2 rounded-lg text-ink hover:bg-sunken cursor-pointer"
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={menuOpen}
             aria-controls="mobile-nav"
@@ -122,10 +127,10 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
 
       {/* Mobile nav panel */}
       {menuOpen && (
-        <div id="mobile-nav" className="lg:hidden border-t border-line bg-surface">
+        <div id="mobile-nav" className="xl:hidden border-t border-line bg-surface">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex flex-col">
             {navItems.map((item) => {
-              const active = activeTab === item.index;
+              const active = isActive(item, activeTab);
               return (
                 <button
                   key={item.index}
@@ -172,7 +177,7 @@ const BrightspacePill: React.FC<{ status: ReturnType<typeof useBrightspace>['sta
       cls = 'bg-gold-soft text-gold-ink border-gold/60';
       break;
     case 'connected':
-      label = 'Brightspace connected';
+      label = 'Brightspace connected (local demo)';
       icon = <CheckCircle2 size={14} aria-hidden="true" />;
       cls = 'bg-success-soft text-success border-success/25';
       break;
@@ -194,7 +199,7 @@ const BrightspacePill: React.FC<{ status: ReturnType<typeof useBrightspace>['sta
       className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-semibold cursor-pointer ${cls}`}
     >
       {icon}
-      <span className="hidden xl:inline">{label}</span>
+      <span className="hidden 2xl:inline whitespace-nowrap">{label}</span>
     </button>
   );
 };

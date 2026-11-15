@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, FileText, Cloud, CheckCircle2, Loader2 } from 'lucide-react';
+import { Upload, FileText, Cloud, CheckCircle2, Loader2, ArrowLeft } from 'lucide-react';
 import { extractTextFromPDF } from '../services/pdfService';
 
 interface UploadMaterialProps {
@@ -8,11 +8,13 @@ interface UploadMaterialProps {
   onContentChange: (content: string) => void;
   onStart: (fileName?: string) => void;
   isSaving: boolean;
+  /** Return to My Courses, the primary place to find material. */
+  onBack?: () => void;
 }
 
 type UploadMode = 'paste' | 'file' | 'drive';
 
-const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChange, onStart, isSaving }) => {
+const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChange, onStart, isSaving, onBack }) => {
   const [mode, setMode] = useState<UploadMode>('paste');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -88,12 +90,20 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
   return (
     <div className="max-w-4xl mx-auto py-4 md:py-8 animate-slide-up">
       {/* Selection Header */}
+      {onBack && (
+        <button type="button" onClick={onBack} className="btn-link inline-flex items-center gap-1.5 text-sm mb-6">
+          <ArrowLeft size={16} aria-hidden="true" /> My Courses
+        </button>
+      )}
       <div className="mb-10 text-center">
-        <p className="eyebrow mb-3">Step 1</p>
+        <p className="eyebrow mb-3">Your own material</p>
         <h2 className="text-3xl md:text-5xl font-extrabold mb-4 tracking-tight text-ink">
           Add <span className="text-cardinal">Material</span>
         </h2>
-        <p className="text-muted text-lg">Choose how you'd like to provide your study content.</p>
+        <p className="text-muted text-lg max-w-2xl mx-auto">
+          Reasoning challenges are generated from the text you add here. Use it for course content you want to be
+          quizzed on, since Brightspace selections are saved as links only, or for notes that aren’t on Brightspace.
+        </p>
       </div>
 
       {/* Mode Selector */}

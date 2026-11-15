@@ -44,7 +44,7 @@ interface QuestionResult {
   topic?: string;
 }
 
-const ReasoningChallenge: React.FC = () => {
+const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMaterial }) => {
   const allAttempts = useStore((s) => s.allAttempts);
   const [phase, setPhase] = useState<QuizPhase>('selection');
   const [loadingStep, setLoadingStep] = useState<LoadingStep>('reading');
@@ -491,7 +491,7 @@ const ReasoningChallenge: React.FC = () => {
         </div>
         <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight mb-4 text-ink">No Study Material Found</h2>
         <p className="text-muted mb-8">Upload some notes or PDFs to start the reasoning challenge.</p>
-        <button onClick={() => window.location.href = '/'} className="btn-secondary px-8 py-3.5 rounded-xl font-semibold">Go to Upload</button>
+        <button onClick={() => (onAddMaterial ? onAddMaterial() : (window.location.href = '/'))} className="btn-secondary px-8 py-3.5 rounded-xl font-semibold">Add material</button>
       </div>
     );
   }
@@ -502,7 +502,17 @@ const ReasoningChallenge: React.FC = () => {
         <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
           <div>
             <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink mb-2">Reasoning Challenge</h2>
-            <p className="text-muted">Step 1: Pick your source materials.</p>
+            <p className="text-muted">
+              Step 1: Pick your source materials.
+              {onAddMaterial && (
+                <>
+                  {' '}
+                  <button type="button" onClick={onAddMaterial} className="btn-link underline underline-offset-4">
+                    Add material
+                  </button>
+                </>
+              )}
+            </p>
           </div>
           {selectedDocIds.size > 0 && (
             <button 

@@ -103,8 +103,8 @@ const App: React.FC = () => {
       <main>
         {activeTab === 0 && (
           <div className="animate-fade-in">
-            {/* "Get Started" mirrors the navbar's Get Started (Upload tab). */}
-            <Hero onGetStarted={() => navigateFromHome(HOME_TABS.upload)} onExploreFeatures={exploreFeatures} />
+            {/* "Get Started" mirrors the navbar's Get Started (My Courses). */}
+            <Hero onGetStarted={() => navigateFromHome(HOME_TABS.courses)} onExploreFeatures={exploreFeatures} />
             <Features onNavigate={navigateFromHome} />
             <HowItWorks />
             <FinalCTA
@@ -129,13 +129,14 @@ const App: React.FC = () => {
               content={uploadedContent} 
               onContentChange={setUploadedContent} 
               onStart={handleStartChallenge} 
-              isSaving={isSaving} 
+              isSaving={isSaving}
+              onBack={() => setActiveTab(HOME_TABS.courses)}
             />
           </div>
         )}
         {activeTab === 2 && (
           <div className="container mx-auto px-4 sm:px-6 py-6 animate-fade-in">
-            <ReasoningChallenge key={challengeSessionKey} />
+            <ReasoningChallenge key={challengeSessionKey} onAddMaterial={() => navigateFromHome(HOME_TABS.upload)} />
           </div>
         )}
         {activeTab === 3 && (
@@ -145,7 +146,7 @@ const App: React.FC = () => {
         )}
         {activeTab === 4 && <StudySchedule onSwitchToChallenge={() => setActiveTab(2)} />}
         {activeTab === 5 && <StudyReport />}
-        {activeTab === 6 && <MyCourses />}
+        {activeTab === 6 && <MyCourses onUpload={() => navigateFromHome(HOME_TABS.upload)} />}
       </main>
     </div>
   );

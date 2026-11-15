@@ -28,6 +28,31 @@ export type BrightspaceStatus =
   | { kind: 'action_required' | 'pending'; message: string }
   | { kind: 'error'; code: string; message: string };
 
+// ── Per-user connection (mirrors server/connections.ts) ─────────────────────
+
+export type ConnectionState = 'not_connected' | 'connecting' | 'connected' | 'expired' | 'error';
+
+/**
+ * local_demo – the developer's Brightspace session on this computer (owner only).
+ * individual – the user's own Brightspace account (needs a registered OAuth app; not available yet).
+ */
+export type ConnectionMethod = 'local_demo' | 'individual';
+
+export const LOCAL_DEMO_LABEL = 'Local demo connection';
+
+/**
+ * The signed-in user's own Brightspace connection. `method` is null until the
+ * server has said which method applies to this UID (or couldn't be reached).
+ */
+export interface BrightspaceConnection {
+  method: ConnectionMethod | null;
+  state: ConnectionState;
+  /** Whether this method can be started now. False for individual connections in this build. */
+  available: boolean;
+  /** True while asking the server which method applies. */
+  resolving: boolean;
+}
+
 // ── Course content (mirrors server/brightspaceMcp.ts) ───────────────────────
 
 /** Where an item lives. A reference only: nothing is fetched from it. */
@@ -112,8 +137,11 @@ export interface UsedMaterials {
 }
 
 export interface BrightspaceContextValue {
+  /** Provider-independent summary of this user's connection. */
+  connection: BrightspaceConnection;
+  /** Detailed local-demo status. Meaningful only when connection.method === 'local_demo'. */
   status: BrightspaceStatus;
-  /** Start (or re-check) the connection. Ignored while one is already running. */
+  /** Start (or re-check) the local demo connection. A no-op for any other method. */
   connect: () => void;
   /** Load one course's module/topic tree through the local connector. */
   fetchCourseContent: (courseId: number, signal?: AbortSignal) => Promise<CourseContentResult>;

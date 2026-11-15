@@ -9,6 +9,10 @@
  * LOCAL_BRIGHTSPACE_EXPECTED_UNIQUE_NAME, and is excluded from Vercel via
  * .vercelignore.
  *
+ * Per-user connection status (GET /connections) is available to any verified
+ * user, but only ever describes the caller's own UID. Individual Brightspace
+ * connections are modelled but not available yet (no registered OAuth app).
+ *
  * Run: npm run server
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -35,6 +39,13 @@ import {
   type BrightspaceCourse,
   type CourseContent,
 } from './brightspaceMcp.ts';
+import {
+  InMemoryConnectionStore,
+  describeConnection,
+  setState,
+  type ConnectionMethod,
+  type ConnectionState,
+} from './connections.ts';
 
 if (!FIREBASE_PROJECT_ID) {
   console.error('[server] FIREBASE_PROJECT_ID is not set. Copy server/.env.example to server/.env.local and fill it in.');
@@ -99,7 +110,8 @@ function sendError(res: ServerResponse, err: unknown, origin?: string) {
 
 // ── Access control (runs before anything touches the connector) ─────────────
 
-async function requireOwner(req: IncomingMessage): Promise<void> {
+/** Verified Firebase UID of the caller. Identity comes only from the token. */
+async function requireVerifiedUser(req: IncomingMessage): Promise<string> {
   const match = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '');
   if (!match) throw new HttpError(401, 'missing_token', 'Sign in to TrojanMind first.');
 
@@ -113,15 +125,63 @@ async function requireOwner(req: IncomingMessage): Promise<void> {
   if (decoded.email_verified !== true) {
     throw new HttpError(403, 'email_unverified', 'Verify your email before connecting to Brightspace.');
   }
+  return decoded.uid;
+}
+
+/** True only for the one configured local demo owner. */
+const isLocalOwner = (uid: string) => Boolean(OWNER_UID) && uid === OWNER_UID;
+
+/** Which connection method applies to this UID. Decided here, never by the client. */
+const methodFor = (uid: string): ConnectionMethod => (isLocalOwner(uid) ? 'local_demo' : 'individual');
+
+async function requireOwner(req: IncomingMessage): Promise<string> {
+  const uid = await requireVerifiedUser(req);
   // Identity comes only from the verified token, never from request input.
   if (!OWNER_UID) {
     throw new HttpError(503, 'connector_not_configured',
       'The local Brightspace connector has no owner configured. Set LOCAL_BRIGHTSPACE_OWNER_UID in server/.env.local and restart `npm run server`.');
   }
-  if (decoded.uid !== OWNER_UID) throw new HttpError(403, 'not_owner', NOT_OWNER_MESSAGE);
+  if (uid !== OWNER_UID) throw new HttpError(403, 'not_owner', NOT_OWNER_MESSAGE);
   if (!EXPECTED_UNIQUE_NAME) {
     throw new HttpError(503, 'connector_not_configured',
       'The expected Brightspace account is not configured. Set LOCAL_BRIGHTSPACE_EXPECTED_UNIQUE_NAME in server/.env.local and restart `npm run server`.');
+  }
+  return uid;
+}
+
+// ── Per-user connection state ───────────────────────────────────────────────
+
+const connections = new InMemoryConnectionStore();
+
+function setLocalState(uid: string, state: ConnectionState, errorCode: string | null = null) {
+  setState(connections, uid, 'brightspace', 'local_demo', state, errorCode);
+}
+
+/** Request failures that mean the connection itself is unusable. */
+const CONNECTION_LEVEL_CODES = new Set(['brightspace_identity_unknown', 'brightspace_identity_mismatch', 'connector_not_configured']);
+
+/**
+ * Run a local-demo request and record the owner's resulting connection state.
+ * A sign-in problem after a successful connection counts as `expired`.
+ */
+async function trackLocal<T>(uid: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const wasConnected = connections.get(uid, 'brightspace')?.state === 'connected';
+    if (err instanceof ConnectorError && err.kind === 'auth') {
+      if (err.authState === 'action_required' || err.authState === 'pending') {
+        setLocalState(uid, wasConnected ? 'expired' : 'connecting', `brightspace_${err.authState}`);
+      } else {
+        setLocalState(uid, 'error', `brightspace_${err.authState ?? 'auth'}`);
+      }
+    } else if (err instanceof HttpError && CONNECTION_LEVEL_CODES.has(err.code)) {
+      setLocalState(uid, 'error', err.code);
+    } else if (err instanceof ConnectorError && (err.kind === 'launch' || err.kind === 'timeout')) {
+      setLocalState(uid, 'error', `brightspace_${err.kind}`);
+    }
+    // Anything else (a missing course, one bad response) leaves the connection state as it was.
+    throw err;
   }
 }
 
@@ -234,25 +294,56 @@ const server = createServer(async (req, res) => {
     }
 
     // Sign in if needed, then load courses. Used automatically after login.
+    // The caller's own connection(s). Any verified user; never another UID's data.
+    if (req.method === 'GET' && url.pathname === '/connections') {
+      const uid = await requireVerifiedUser(req);
+      return send(res, 200, { connections: [describeConnection(connections, uid, 'brightspace', methodFor(uid))] }, origin);
+    }
+
+    // Individual connections need a registered Brightspace OAuth app. Refuse
+    // clearly instead of starting anything (and never the local connector).
+    if (req.method === 'POST' && url.pathname === '/connections/brightspace/start') {
+      const uid = await requireVerifiedUser(req);
+      if (isLocalOwner(uid)) {
+        throw new HttpError(400, 'use_local_demo', 'This account uses the local demo connection. Use “Connect to Brightspace” on My Courses.');
+      }
+      throw new HttpError(501, 'individual_oauth_not_configured',
+        'Individual Brightspace connections aren’t available yet. TrojanMind doesn’t have an approved Brightspace integration.');
+    }
+
     if (req.method === 'POST' && url.pathname === '/brightspace/connect') {
-      await requireOwner(req);
-      return send(res, 200, await connectAndLoad(), origin);
+      const uid = await requireOwner(req);
+      setLocalState(uid, 'connecting');
+      let result: ConnectResult;
+      try {
+        result = await trackLocal(uid, connectAndLoad);
+      } catch (err) {
+        // Never leave a failed attempt looking like it's still in progress.
+        const now = connections.get(uid, 'brightspace');
+        if (now?.state === 'connecting' && !now.errorCode) setLocalState(uid, 'error', 'brightspace_connect_failed');
+        throw err;
+      }
+      if (result.state === 'connected') setLocalState(uid, 'connected');
+      else if (result.state === 'action_required' || result.state === 'pending') setLocalState(uid, 'connecting', `brightspace_${result.state}`);
+      else setLocalState(uid, 'error', `brightspace_${result.state}`);
+      return send(res, 200, result, origin);
     }
 
     // Courses from the existing session. Doesn't call sign_in (the connector may
     // still renew an expired session on its own, as it does for any tool call).
     if (req.method === 'GET' && url.pathname === '/brightspace/courses') {
-      await requireOwner(req);
-      const courses = await loadVerifiedCourses();
+      const uid = await requireOwner(req);
+      const courses = await trackLocal(uid, loadVerifiedCourses);
+      setLocalState(uid, 'connected');
       return send(res, 200, { courses, retrievedAt: new Date().toISOString() }, origin);
     }
 
     // Module/topic tree for one of the user's accessible courses.
     const contentMatch = /^\/brightspace\/courses\/([^/]+)\/content$/.exec(url.pathname);
     if (req.method === 'GET' && contentMatch) {
-      await requireOwner(req);
+      const uid = await requireOwner(req);
       const courseId = parseCourseId(contentMatch[1]);
-      const { course, content } = await loadVerifiedCourseContent(courseId);
+      const { course, content } = await trackLocal(uid, () => loadVerifiedCourseContent(courseId));
       return send(res, 200, {
         course: { id: course.id, name: course.name, code: course.code },
         ...content,

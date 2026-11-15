@@ -4,7 +4,10 @@ import { useAuth } from '../auth/useAuth';
 import {
   BrightspaceContext,
   NOT_OWNER_MESSAGE,
+  type BrightspaceConnection,
   type BrightspaceContextValue,
+  type ConnectionMethod,
+  type ConnectionState,
   type BrightspaceStatus,
   type Course,
   type CourseContentResult,
@@ -16,6 +19,33 @@ import { courseContentEndpoint, toCourseContent } from './contentApi';
 
 // Proxied by the Vite dev server to the localhost-only connector (server/index.ts).
 const CONNECT_ENDPOINT = '/local-api/brightspace/connect';
+const CONNECTIONS_ENDPOINT = '/local-api/connections';
+
+type Resolution =
+  | { kind: 'resolved'; method: ConnectionMethod; available: boolean }
+  | { kind: 'failed'; code: string; message: string };
+
+async function readJson(res: Response): Promise<unknown> {
+  return (res.headers.get('content-type') ?? '').includes('application/json') ? res.json().catch(() => null) : null;
+}
+
+/** Collapse the detailed local-demo status into the provider-independent state. */
+function localDemoState(status: BrightspaceStatus, wasConnected: boolean): ConnectionState {
+  switch (status.kind) {
+    case 'idle':
+      return 'not_connected';
+    case 'connecting':
+      return 'connecting';
+    case 'connected':
+      return 'connected';
+    case 'action_required':
+    case 'pending':
+      // Sign-in needed again after this session had connected: the session expired.
+      return wasConnected ? 'expired' : 'connecting';
+    case 'error':
+      return 'error';
+  }
+}
 
 function isCourse(v: unknown): v is Course {
   if (!v || typeof v !== 'object') return false;
@@ -61,8 +91,34 @@ function toStatus(res: Response, body: unknown): BrightspaceStatus {
   return { kind: 'error', code, message };
 }
 
+/** Read the caller's own Brightspace entry from GET /connections. */
+function toResolution(res: Response, body: unknown): Resolution {
+  if (!body || typeof body !== 'object') return { kind: 'failed', code: 'unreachable', message: '' };
+  const b = body as Record<string, unknown>;
+  if (!res.ok) {
+    const err = (b.error ?? {}) as Record<string, unknown>;
+    return { kind: 'failed', code: asString(err.code, `http_${res.status}`), message: asString(err.message, 'The connector returned an error.') };
+  }
+  const entry = Array.isArray(b.connections)
+    ? (b.connections as unknown[]).find(
+        (c): c is Record<string, unknown> => !!c && typeof c === 'object' && (c as Record<string, unknown>).provider === 'brightspace',
+      )
+    : undefined;
+  if (entry && (entry.method === 'local_demo' || entry.method === 'individual')) {
+    // Only the server may say a method is available; individual is never available in this build.
+    return { kind: 'resolved', method: entry.method, available: entry.method === 'local_demo' && entry.available === true };
+  }
+  return { kind: 'failed', code: 'bad_response', message: 'The connector returned connection data in an unexpected format.' };
+}
+
 const Inner: React.FC<{ user: User; children: React.ReactNode }> = ({ user, children }) => {
   const [status, setStatus] = useState<BrightspaceStatus>({ kind: 'idle' });
+  // Which connection method the server says applies to this UID (null = not known yet).
+  const [method, setMethod] = useState<ConnectionMethod | null>(null);
+  const [available, setAvailable] = useState(false);
+  const [resolving, setResolving] = useState(true);
+  const methodRef = useRef<ConnectionMethod | null>(null);
+  const [wasConnected, setWasConnected] = useState(false);
   // The one attempt currently running, if any.
   const activeRef = useRef<AbortController | null>(null);
   // Read through a ref so `connect` stays stable: a Firebase token refresh
@@ -72,7 +128,17 @@ const Inner: React.FC<{ user: User; children: React.ReactNode }> = ({ user, chil
     userRef.current = user;
   }, [user]);
 
-  const connect = useCallback(() => {
+  const applyMethod = useCallback((m: ConnectionMethod | null, isAvailable: boolean) => {
+    methodRef.current = m;
+    setMethod(m);
+    setAvailable(isAvailable);
+  }, []);
+
+  /** One local-demo connect attempt. Only ever runs for the server-confirmed owner. */
+  const startLocal = useCallback(() => {
+    // Only the configured local demo owner may use the local connector. Everyone
+    // else needs an individual connection, which isn't available yet.
+    if (methodRef.current !== 'local_demo') return;
     if (activeRef.current) return; // repeated clicks / rerenders never start a second attempt
     const controller = new AbortController();
     activeRef.current = controller;
@@ -88,30 +154,82 @@ const Inner: React.FC<{ user: User; children: React.ReactNode }> = ({ user, chil
           cache: 'no-store',
           signal: controller.signal,
         });
-        const json = (res.headers.get('content-type') ?? '').includes('application/json')
-          ? await res.json().catch(() => null)
-          : null;
-        next = toStatus(res, json);
+        next = toStatus(res, await readJson(res));
       } catch {
         next = { kind: 'error', code: 'unreachable', message: '' };
       } finally {
         if (activeRef.current === controller) activeRef.current = null;
       }
       // Signed out / unmounted meanwhile: drop the result.
-      if (!controller.signal.aborted) setStatus(next);
+      if (controller.signal.aborted) return;
+      if (next.kind === 'error' && next.code === 'not_owner') {
+        // Owner config changed under us: this UID is not the local demo owner.
+        applyMethod('individual', false);
+        setStatus({ kind: 'idle' });
+        return;
+      }
+      if (next.kind === 'connected') setWasConnected(true);
+      setStatus(next);
     })();
-  }, []);
+  }, [applyMethod]);
 
-  // Exactly one automatic attempt per login (per mount of this provider).
-  // No automatic retries. The server joins concurrent requests into one sign-in,
-  // so StrictMode's dev-only remount can't start a second one either.
+  const resolveRef = useRef<AbortController | null>(null);
+
+  /**
+   * Ask the server which method applies to this UID, then make one automatic
+   * attempt only if it's the local demo owner.
+   */
+  const resolve = useCallback(() => {
+    if (resolveRef.current) return;
+    const controller = new AbortController();
+    resolveRef.current = controller;
+    setResolving(true);
+    void (async () => {
+      let resolution: Resolution;
+      try {
+        const token = await userRef.current.getIdToken();
+        const res = await fetch(CONNECTIONS_ENDPOINT, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        resolution = toResolution(res, await readJson(res));
+      } catch {
+        resolution = { kind: 'failed', code: 'unreachable', message: '' };
+      } finally {
+        if (resolveRef.current === controller) resolveRef.current = null;
+      }
+      if (controller.signal.aborted) return;
+      setResolving(false);
+      if (resolution.kind === 'failed') {
+        applyMethod(null, false);
+        setStatus({ kind: 'error', code: resolution.code, message: resolution.message });
+        return;
+      }
+      applyMethod(resolution.method, resolution.available);
+      setStatus({ kind: 'idle' });
+      if (resolution.method === 'local_demo' && resolution.available) startLocal();
+    })();
+  }, [startLocal, applyMethod]);
+
+  /** Public “connect / try again”: re-resolve if the method isn't known yet. */
+  const connect = useCallback(() => {
+    if (methodRef.current === null) resolve();
+    else startLocal();
+  }, [resolve, startLocal]);
+
+  // Once per login (per mount of this provider). No automatic retries. The
+  // server joins concurrent connects into one sign-in, so StrictMode's dev-only
+  // remount is harmless.
   useEffect(() => {
-    connect();
+    resolve();
     return () => {
+      resolveRef.current?.abort();
+      resolveRef.current = null;
       activeRef.current?.abort();
       activeRef.current = null;
     };
-  }, [connect]);
+  }, [resolve]);
 
   const fetchCourseContent = useCallback(async (courseId: number, signal?: AbortSignal): Promise<CourseContentResult> => {
     let res: Response;
@@ -123,7 +241,7 @@ const Inner: React.FC<{ user: User; children: React.ReactNode }> = ({ user, chil
         cache: 'no-store',
         signal,
       });
-      if ((res.headers.get('content-type') ?? '').includes('application/json')) json = await res.json().catch(() => null);
+      json = await readJson(res);
     } catch (err) {
       if (signal?.aborted) throw err;
       return { ok: false, kind: 'error', code: 'unreachable', message: '' };
@@ -156,14 +274,22 @@ const Inner: React.FC<{ user: User; children: React.ReactNode }> = ({ user, chil
     setUsedMaterials((all) => ({ ...all, [courseId]: { courseId, items, savedAt: new Date().toISOString() } }));
   }, []);
 
+  const connection = useMemo<BrightspaceConnection>(() => {
+    if (method === 'local_demo') return { method, state: localDemoState(status, wasConnected), available, resolving };
+    // Individual connections can't be started in this build, so they're never connected.
+    if (method === 'individual') return { method, state: 'not_connected', available: false, resolving };
+    return { method: null, state: resolving ? 'connecting' : status.kind === 'error' ? 'error' : 'not_connected', available: false, resolving };
+  }, [method, status, wasConnected, available, resolving]);
+
   const value = useMemo<BrightspaceContextValue>(
-    () => ({ status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials }),
-    [status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials],
+    () => ({ connection, status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials }),
+    [connection, status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials],
   );
   return <BrightspaceContext.Provider value={value}>{children}</BrightspaceContext.Provider>;
 };
 
 const SIGNED_OUT_VALUE: BrightspaceContextValue = {
+  connection: { method: null, state: 'not_connected', available: false, resolving: false },
   status: { kind: 'idle' },
   connect: () => undefined,
   fetchCourseContent: async () => ({ ok: false, kind: 'error', code: 'signed_out', message: 'Sign in to TrojanMind first.' }),
