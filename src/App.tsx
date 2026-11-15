@@ -17,6 +17,7 @@ import type { SaveDocumentMeta } from './services/firebaseService';
 import { InitialDataLoader } from './components/InitialDataLoader';
 import MyCourses from './components/MyCourses';
 import MyMaterials from './components/MyMaterials';
+import PiazzaAssistant from './components/PiazzaAssistant';
 import './index.css';
 
 const DEMO_SESSION = {
@@ -209,6 +210,8 @@ const App: React.FC = () => {
           />
         )}
       </main>
+      {/* Authenticated-only floating assistant; does not add a nav tab. */}
+      <PiazzaAssistant />
     </div>
   );
 };

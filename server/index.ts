@@ -16,6 +16,9 @@
  * POST /ai/messages proxies Claude for every TrojanMind AI feature, for any
  * verified user; ANTHROPIC_API_KEY stays on this server.
  *
+ * Piazza routes (/piazza/*) use the local piazza-mcp client/session for the
+ * configured LOCAL_PIAZZA_OWNER_UID only. Credentials never leave the server.
+ *
  * Per-user connection status (GET /connections) is available to any verified
  * user, but only ever describes the caller's own UID. Individual Brightspace
  * connections are modelled but not available yet (no registered OAuth app).
@@ -32,6 +35,7 @@ import {
   HAS_ADMIN_CREDENTIALS,
   HOST,
   OWNER_UID,
+  PIAZZA_OWNER_UID,
   PORT,
 } from './config.ts';
 import {
@@ -47,6 +51,16 @@ import {
   type BrightspaceCourse,
   type CourseContent,
 } from './brightspaceMcp.ts';
+import {
+  PiazzaConnectorError,
+  closePiazzaConnector,
+  connectPiazza,
+  listClasses,
+  listRecentPosts,
+  readPosts,
+  safePiazzaUrl,
+  searchPosts,
+} from './piazzaMcp.ts';
 import {
   InMemoryConnectionStore,
   describeConnection,
@@ -78,6 +92,7 @@ const adminAuth = getAuth();
 
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 const NOT_OWNER_MESSAGE = 'Brightspace connection is available only to the configured local demo account.';
+const NOT_PIAZZA_OWNER_MESSAGE = 'Piazza connection is available only to the configured local demo account.';
 
 // ── HTTP helpers ────────────────────────────────────────────────────────────
 
@@ -112,6 +127,10 @@ function describeError(err: unknown): { status: number; code: string; message: s
     const status = err.kind === 'timeout' ? 504 : err.kind === 'auth' ? 409 : 502;
     const code = err.authState ? `brightspace_${err.authState}` : `brightspace_${err.kind}`;
     return { status, code, message: err.message };
+  }
+  if (err instanceof PiazzaConnectorError) {
+    const status = err.kind === 'pending' ? 202 : err.kind === 'auth' ? 409 : err.kind === 'launch' ? 503 : 502;
+    return { status: status === 202 ? 409 : status, code: `piazza_${err.kind}`, message: err.message };
   }
   console.error('[server] unexpected error');
   return { status: 500, code: 'internal', message: 'Unexpected connector error.' };
@@ -180,6 +199,32 @@ async function requireOwner(req: IncomingMessage): Promise<string> {
       'The expected Brightspace account is not configured. Set LOCAL_BRIGHTSPACE_EXPECTED_UNIQUE_NAME in server/.env.local and restart `npm run server`.');
   }
   return uid;
+}
+
+/** True only for the configured Piazza local-demo owner (may differ from Brightspace). */
+const isPiazzaOwner = (uid: string) => Boolean(PIAZZA_OWNER_UID) && uid === PIAZZA_OWNER_UID;
+
+const piazzaMethodFor = (uid: string): ConnectionMethod => (isPiazzaOwner(uid) ? 'local_demo' : 'individual');
+
+async function requirePiazzaOwner(req: IncomingMessage): Promise<string> {
+  const uid = await requireVerifiedUser(req);
+  if (!PIAZZA_OWNER_UID) {
+    throw new HttpError(503, 'piazza_not_configured',
+      'The local Piazza connector has no owner configured. Set LOCAL_PIAZZA_OWNER_UID in server/.env.local and restart `npm run server`.');
+  }
+  if (uid !== PIAZZA_OWNER_UID) throw new HttpError(403, 'not_piazza_owner', NOT_PIAZZA_OWNER_MESSAGE);
+  return uid;
+}
+
+function setPiazzaState(uid: string, state: ConnectionState, errorCode: string | null = null) {
+  setState(connections, uid, 'piazza', 'local_demo', state, errorCode);
+}
+
+function parsePiazzaClassId(segment: string): string {
+  if (!/^[A-Za-z0-9_-]{4,64}$/.test(segment)) {
+    throw new HttpError(400, 'invalid_piazza_class_id', 'That Piazza class ID isn’t valid.');
+  }
+  return segment;
 }
 
 // ── Per-user connection state ───────────────────────────────────────────────
@@ -349,7 +394,12 @@ const server = createServer(async (req, res) => {
     // The caller's own connection(s). Any verified user; never another UID's data.
     if (req.method === 'GET' && url.pathname === '/connections') {
       const uid = await requireVerifiedUser(req);
-      return send(res, 200, { connections: [describeConnection(connections, uid, 'brightspace', methodFor(uid))] }, origin);
+      return send(res, 200, {
+        connections: [
+          describeConnection(connections, uid, 'brightspace', methodFor(uid)),
+          describeConnection(connections, uid, 'piazza', piazzaMethodFor(uid)),
+        ],
+      }, origin);
     }
 
     // Individual connections need a registered Brightspace OAuth app. Refuse
@@ -461,6 +511,98 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── Piazza (owner-only local demo) ─────────────────────────────────────
+
+    if (req.method === 'POST' && url.pathname === '/piazza/connect') {
+      const uid = await requirePiazzaOwner(req);
+      setPiazzaState(uid, 'connecting');
+      try {
+        const body = await readJsonBody(req, 4 * 1024).catch(() => ({}));
+        const force = !!(body && typeof body === 'object' && (body as { force?: unknown }).force === true);
+        const result = await connectPiazza(force);
+        setPiazzaState(uid, 'connected');
+        return send(res, 200, { state: 'connected', ...result }, origin);
+      } catch (err) {
+        if (err instanceof PiazzaConnectorError && err.kind === 'pending') {
+          setPiazzaState(uid, 'connecting', 'piazza_pending');
+          return send(res, 200, { state: 'pending', message: err.message }, origin);
+        }
+        if (err instanceof PiazzaConnectorError && err.kind === 'auth') {
+          setPiazzaState(uid, 'expired', 'piazza_auth');
+        } else {
+          setPiazzaState(uid, 'error', err instanceof PiazzaConnectorError ? `piazza_${err.kind}` : 'piazza_connect_failed');
+        }
+        throw err;
+      }
+    }
+
+    if (req.method === 'GET' && url.pathname === '/piazza/classes') {
+      const uid = await requirePiazzaOwner(req);
+      try {
+        const classes = await listClasses(url.searchParams.get('includeInactive') === '1');
+        setPiazzaState(uid, 'connected');
+        return send(res, 200, { classes, retrievedAt: new Date().toISOString() }, origin);
+      } catch (err) {
+        if (err instanceof PiazzaConnectorError && (err.kind === 'auth' || err.kind === 'pending')) {
+          setPiazzaState(uid, err.kind === 'pending' ? 'connecting' : 'expired', `piazza_${err.kind}`);
+        }
+        throw err;
+      }
+    }
+
+    const piazzaPostsMatch = /^\/piazza\/classes\/([^/]+)\/posts$/.exec(url.pathname);
+    if (req.method === 'GET' && piazzaPostsMatch) {
+      const uid = await requirePiazzaOwner(req);
+      const classId = parsePiazzaClassId(piazzaPostsMatch[1]);
+      const q = url.searchParams.get('q')?.trim() || '';
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 30) || 30));
+      const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0) || 0);
+      try {
+        if (q) {
+          const posts = await searchPosts(classId, q, limit);
+          setPiazzaState(uid, 'connected');
+          return send(res, 200, {
+            posts,
+            coverageNote: `Search results for “${q.slice(0, 80)}” (authorized Piazza search; not a full archive dump).`,
+            retrievedAt: new Date().toISOString(),
+          }, origin);
+        }
+        const { posts, coverageNote } = await listRecentPosts(classId, limit, offset);
+        setPiazzaState(uid, 'connected');
+        return send(res, 200, { posts, coverageNote, retrievedAt: new Date().toISOString() }, origin);
+      } catch (err) {
+        if (err instanceof PiazzaConnectorError && (err.kind === 'auth' || err.kind === 'pending')) {
+          setPiazzaState(uid, err.kind === 'pending' ? 'connecting' : 'expired', `piazza_${err.kind}`);
+        }
+        throw err;
+      }
+    }
+
+    const piazzaReadMatch = /^\/piazza\/classes\/([^/]+)\/read$/.exec(url.pathname);
+    if (req.method === 'POST' && piazzaReadMatch) {
+      const uid = await requirePiazzaOwner(req);
+      const classId = parsePiazzaClassId(piazzaReadMatch[1]);
+      const body = await readJsonBody(req, 16 * 1024);
+      const refsRaw = body && typeof body === 'object' ? (body as { posts?: unknown }).posts : null;
+      if (!Array.isArray(refsRaw) || refsRaw.length < 1 || refsRaw.length > 30) {
+        throw new HttpError(400, 'invalid_posts', 'Provide 1–30 post numbers to read.');
+      }
+      const refs = refsRaw.map((r) => String(r));
+      try {
+        const posts = await readPosts(classId, refs);
+        setPiazzaState(uid, 'connected');
+        return send(res, 200, {
+          posts: posts.map((p) => ({ ...p, url: safePiazzaUrl(p.url, classId) })),
+          retrievedAt: new Date().toISOString(),
+        }, origin);
+      } catch (err) {
+        if (err instanceof PiazzaConnectorError && (err.kind === 'auth' || err.kind === 'pending')) {
+          setPiazzaState(uid, err.kind === 'pending' ? 'connecting' : 'expired', `piazza_${err.kind}`);
+        }
+        throw err;
+      }
+    }
+
     return sendError(res, new HttpError(404, 'not_found', 'Not found.'), origin);
   } catch (err) {
     return sendError(res, err, origin);
@@ -476,7 +618,7 @@ server.listen(PORT, HOST, () => {
 });
 
 const shutdown = () => {
-  void closeConnector().finally(() => process.exit(0));
+  void Promise.all([closeConnector(), closePiazzaConnector()]).finally(() => process.exit(0));
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

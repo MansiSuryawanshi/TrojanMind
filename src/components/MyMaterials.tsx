@@ -140,6 +140,7 @@ const WorkspaceView: React.FC<MyMaterialsProps & { id: string }> = ({ id, onOpen
   const [practiceDocId, setPracticeDocId] = useState<string | null>(null);
   const busyRef = useRef(false);
   const setSummaryBridge = useStore((s) => s.setSummaryBridge);
+  const setStudyCourseContext = useStore((s) => s.setStudyCourseContext);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -154,10 +155,16 @@ const WorkspaceView: React.FC<MyMaterialsProps & { id: string }> = ({ id, onOpen
       setWs(w);
       setTexts(t);
       setOutputs(o);
+      setStudyCourseContext({
+        brightspaceCourseId: w.courseId,
+        courseName: w.courseName,
+        courseCode: w.courseCode,
+        workspaceId: w.id,
+      });
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Couldn’t load this workspace.');
     }
-  }, [id]);
+  }, [id, setStudyCourseContext]);
 
   useEffect(() => { void load(); }, [load]);
 

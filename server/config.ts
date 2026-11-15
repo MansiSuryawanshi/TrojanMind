@@ -49,6 +49,21 @@ export const HAS_ADMIN_CREDENTIALS = Boolean(trimmed('GOOGLE_APPLICATION_CREDENT
 export const ANTHROPIC_API_KEY = trimmed('ANTHROPIC_API_KEY');
 
 /**
+ * The one Firebase user allowed to use the Piazza session on this computer.
+ * Separate from Brightspace ownership — set explicitly; never inferred.
+ */
+export const PIAZZA_OWNER_UID = trimmed('LOCAL_PIAZZA_OWNER_UID') ?? OWNER_UID;
+
+/** Optional Piazza email/password (SSO users should leave blank and use browser login). */
+export const PIAZZA_EMAIL = trimmed('PIAZZA_EMAIL');
+export const PIAZZA_PASSWORD = trimmed('PIAZZA_PASSWORD');
+
+/** Optional override for where piazza-mcp stores session cookies. */
+export function piazzaMcpHome(): string | undefined {
+  return trimmed('PIAZZA_MCP_HOME');
+}
+
+/**
  * How to launch the MCP server. Default is the package's documented Windows
  * command: `cmd /c npx -y brightspace-mcp-server@latest` (plain `npx` elsewhere).
  */

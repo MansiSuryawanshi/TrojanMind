@@ -42,20 +42,29 @@ export class ConnectorError extends Error {
 
 // sign_in waits up to ~45 s per call for an MFA approval; leave headroom.
 const CALL_TIMEOUT_MS = 180_000;
-const AUTH_COMMAND = 'npx -y brightspace-mcp-server@latest auth';
+// Always pin USC when re-authing from a terminal (MCP package defaults to Purdue).
+const AUTH_COMMAND =
+  'set D2L_BASE_URL=https://brightspace.usc.edu&& npx -y brightspace-mcp-server@latest auth';
 
 let clientPromise: Promise<Client> | null = null;
 
 function connect(): Promise<Client> {
   if (clientPromise) return clientPromise;
   const { command, args } = mcpLaunch();
+  // brightspace-mcp-server defaults to Purdue if D2L_BASE_URL is unset.
+  // Force USC Brightspace unless BRIGHTSPACE_BASE_URL overrides it.
+  const schoolOrigin = BRIGHTSPACE_BASE_URL || 'https://brightspace.usc.edu';
   const transport = new StdioClientTransport({
     command,
     args,
     // SDK's safe default env (PATH, USERPROFILE, APPDATA, ...) so the server can
     // reach its own keychain entry and encrypted session. We add nothing secret
-    // and change no sign-in / MFA preferences.
-    env: { ...getDefaultEnvironment(), D2L_NO_UPDATE_CHECK: '1' },
+    // and change no sign-in / MFA preferences — only the school URL.
+    env: {
+      ...getDefaultEnvironment(),
+      D2L_NO_UPDATE_CHECK: '1',
+      D2L_BASE_URL: schoolOrigin,
+    },
     // The child's logs could mention sign-in details; don't surface them.
     stderr: 'ignore',
   });

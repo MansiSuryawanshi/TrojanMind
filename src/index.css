@@ -75,9 +75,193 @@ body {
 }
 @keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
 @keyframes bounce-dot { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-5px) } }
+@keyframes piazza-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes piazza-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-6deg); }
+  75% { transform: rotate(6deg); }
+}
+@keyframes piazza-badge-pop {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
 
 .animate-slide-up { animation: slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-fade-in  { animation: fade-in 0.4s ease both; }
+
+/* Piazza floating launcher — cute, light motion only */
+.piazza-fab {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.5rem;
+  z-index: 150;
+}
+.piazza-fab__hint {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.55rem);
+  white-space: nowrap;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px 999px 4px 999px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  box-shadow: var(--shadow-card);
+  color: var(--color-ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px) scale(0.96);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.piazza-fab:hover .piazza-fab__hint,
+.piazza-fab:focus-within .piazza-fab__hint,
+.piazza-fab--alert .piazza-fab__hint {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.piazza-fab__shell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.piazza-fab__btn {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 3.25rem;
+  padding: 0.4rem 0.85rem 0.4rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-cardinal) 28%, var(--color-line));
+  background:
+    linear-gradient(180deg, #fffdf9 0%, var(--color-canvas) 100%);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-raised);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  overflow: visible;
+}
+/* Golden arc travels along the pill outline (not a circle). */
+.piazza-fab__pill-orbit {
+  position: absolute;
+  inset: -2px;
+  width: calc(100% + 4px);
+  height: calc(100% + 4px);
+  pointer-events: none;
+  overflow: visible;
+  z-index: 2;
+}
+.piazza-fab__pill-track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--color-gold) 30%, transparent);
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+.piazza-fab__pill-arc {
+  fill: none;
+  stroke: var(--color-gold);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-dasharray: 18 82;
+  vector-effect: non-scaling-stroke;
+  animation: piazza-pill-trace 2.6s linear infinite;
+}
+@keyframes piazza-pill-trace {
+  to { stroke-dashoffset: -100; }
+}
+.piazza-fab__btn:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--color-cardinal) 55%, var(--color-line));
+  box-shadow: 0 10px 28px rgba(36, 32, 32, 0.14);
+}
+.piazza-fab__btn:active { transform: translateY(0); }
+.piazza-fab__mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.55rem;
+  height: 2.55rem;
+  border-radius: 999px;
+  background: var(--color-cardinal);
+  color: white;
+  flex-shrink: 0;
+}
+.piazza-fab--alert .piazza-fab__mark {
+  animation: piazza-bob 1.8s ease-in-out infinite;
+}
+.piazza-fab__orbit {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  pointer-events: none;
+  animation: piazza-orbit-spin 2.8s linear infinite;
+}
+.piazza-fab__orbit-track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--color-gold) 28%, transparent);
+  stroke-width: 1.5;
+}
+.piazza-fab__orbit-arc {
+  fill: none;
+  stroke: var(--color-gold);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 28 90;
+}
+.piazza-fab__mark-icon {
+  position: relative;
+  z-index: 1;
+  width: 1.2rem;
+  height: 1.2rem;
+}
+.piazza-fab--alert .piazza-fab__mark-icon {
+  animation: piazza-wiggle 1.8s ease-in-out infinite;
+}
+@keyframes piazza-orbit-spin {
+  to { transform: rotate(360deg); }
+}
+.piazza-fab__copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+  padding-right: 0.15rem;
+}
+.piazza-fab__title {
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--color-cardinal);
+}
+.piazza-fab__sub {
+  font-size: 0.68rem;
+  color: var(--color-muted);
+  font-weight: 500;
+}
+.piazza-fab__badge {
+  position: absolute;
+  top: -0.2rem;
+  right: -0.15rem;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-gold);
+  color: var(--color-ink);
+  font-size: 0.68rem;
+  font-weight: 800;
+  border: 2px solid var(--color-surface);
+  animation: piazza-badge-pop 1.6s ease-in-out infinite;
+}
 .anim-delay-1 { animation-delay: 0.05s; }
 .anim-delay-2 { animation-delay: 0.1s; }
 .anim-delay-3 { animation-delay: 0.15s; }

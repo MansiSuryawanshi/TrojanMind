@@ -10,6 +10,7 @@ import type {
   QuizAttempt,
 } from '../types';
 import type { RevisionTask } from '../types/summary';
+import type { StudyCourseContext } from '../types/piazza';
 
 /** Bridge so Summary can hand off into Exam Prep / Schedule without a router. */
 export interface SummaryBridge {
@@ -42,6 +43,9 @@ export interface SessionState {
   summaryBridge: SummaryBridge;
   revisionTasks: RevisionTask[];
 
+  /** Course currently being studied (from a Brightspace workspace), for Piazza context. */
+  studyCourseContext: StudyCourseContext | null;
+
   setSession: (session: Session) => void;
   setQuiz: (quiz: GeneratedQuestion[]) => void;
   updatePhase: (phase: SessionPhase) => void;
@@ -64,6 +68,7 @@ export interface SessionState {
   setSummaryBridge: (patch: Partial<SummaryBridge>) => void;
   setRevisionTasks: (tasks: RevisionTask[]) => void;
   addRevisionTaskLocal: (task: RevisionTask) => void;
+  setStudyCourseContext: (ctx: StudyCourseContext | null) => void;
 
   /** Drop every user-specific value (called on logout / account switch). */
   resetUserState: () => void;
@@ -93,6 +98,7 @@ const userDefaults = () => ({
   quizAnswers: [],
   summaryBridge: { ...defaultBridge },
   revisionTasks: [],
+  studyCourseContext: null,
 });
 
 export const useStore = create<SessionState>((set) => ({
@@ -113,6 +119,7 @@ export const useStore = create<SessionState>((set) => ({
 
   summaryBridge: { ...defaultBridge },
   revisionTasks: [],
+  studyCourseContext: null,
 
   setSession: (session: Session) => set({ session }),
   setQuiz: (quiz: GeneratedQuestion[]) => set({ currentQuiz: quiz }),
@@ -150,6 +157,7 @@ export const useStore = create<SessionState>((set) => ({
   setRevisionTasks: (revisionTasks) => set({ revisionTasks }),
   addRevisionTaskLocal: (task) =>
     set((state) => ({ revisionTasks: [...state.revisionTasks, task] })),
+  setStudyCourseContext: (studyCourseContext) => set({ studyCourseContext }),
 
   resetUserState: () => set(userDefaults()),
 }));

@@ -12,14 +12,14 @@
  *    in a PublicConnection.
  */
 
-export type ConnectionProvider = 'brightspace';
+export type ConnectionProvider = 'brightspace' | 'piazza';
 
 export type ConnectionState = 'not_connected' | 'connecting' | 'connected' | 'expired' | 'error';
 
 /**
- * local_demo – the developer's own Brightspace session on this computer,
- *              usable only by LOCAL_BRIGHTSPACE_OWNER_UID.
- * individual – the user's own Brightspace account via a registered OAuth app.
+ * local_demo – the developer's own LMS/Piazza session on this computer,
+ *              usable only by the configured local owner UID.
+ * individual – the user's own account via a registered OAuth app (not available yet).
  */
 export type ConnectionMethod = 'local_demo' | 'individual';
 
@@ -49,7 +49,12 @@ export interface PublicConnection {
 
 export const METHOD_LABELS: Record<ConnectionMethod, string> = {
   local_demo: 'Local demo connection',
-  individual: 'Your Brightspace account',
+  individual: 'Your account (OAuth)',
+};
+
+export const PROVIDER_LABELS: Record<ConnectionProvider, string> = {
+  brightspace: 'Brightspace',
+  piazza: 'Piazza',
 };
 
 /**
@@ -124,10 +129,11 @@ export function describeConnection(
     };
   }
 
+  const baseLabel = PROVIDER_LABELS[provider];
   return {
     provider,
     method,
-    label: METHOD_LABELS[method],
+    label: method === 'local_demo' ? `${baseLabel} (local demo)` : `${baseLabel} account`,
     state: own?.state ?? 'not_connected',
     available: true,
     unavailableReason: null,
