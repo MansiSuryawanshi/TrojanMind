@@ -1,7 +1,10 @@
-import React from 'react';
-import { AlertTriangle, BookOpen, CheckCircle2, Clock, Laptop, Loader2, RefreshCw, Smartphone } from 'lucide-react';
+import React, { useState } from 'react';
+import { AlertTriangle, BookOpen, CheckCircle2, ChevronRight, Clock, Laptop, Loader2, RefreshCw, Smartphone } from 'lucide-react';
+import CourseDetail from './CourseDetail';
 import { useAuth } from '../auth/useAuth';
 import { useBrightspace } from '../brightspace/useBrightspace';
+import type { Course } from '../brightspace/brightspaceContext';
+import { groupCoursesBySemester } from '../brightspace/semesters';
 
 function formatDate(iso: string | null): string | null {
   if (!iso) return null;
@@ -20,8 +23,18 @@ const Badge: React.FC<{ tone: 'success' | 'muted' | 'warning'; children: React.R
 
 const MyCourses: React.FC = () => {
   const { user } = useAuth();
-  const { status, connect } = useBrightspace();
+  const { status, connect, selections } = useBrightspace();
   const busy = status.kind === 'connecting';
+  const [open, setOpen] = useState<{ course: Course; semesterLabel: string } | null>(null);
+
+  const backToList = () => {
+    setOpen(null);
+    window.scrollTo({ top: 0 });
+  };
+
+  if (open) {
+    return <CourseDetail key={open.course.id} course={open.course} semesterLabel={open.semesterLabel} onBack={backToList} />;
+  }
 
   const buttonLabel =
     status.kind === 'connecting' ? 'Connecting to Brightspace…'
@@ -105,37 +118,100 @@ const MyCourses: React.FC = () => {
               {status.courses.length} course{status.courses.length === 1 ? '' : 's'} · retrieved{' '}
               {new Date(status.retrievedAt).toLocaleTimeString()}
             </p>
-            <ul className="grid gap-3">
-              {status.courses.map((c) => {
-                const start = formatDate(c.startDate);
-                const end = formatDate(c.endDate);
-                return (
-                  <li key={c.id} className="surface rounded-xl p-5 border-l-4 border-l-cardinal">
-                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                      <div className="min-w-0">
-                        <h2 className="font-bold text-ink leading-snug break-words">{c.name}</h2>
-                        <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
-                          <div><dt className="inline font-semibold">Code: </dt><dd className="inline font-mono text-ink">{c.code ?? '—'}</dd></div>
-                          <div><dt className="inline font-semibold">ID: </dt><dd className="inline font-mono text-ink">{c.id}</dd></div>
-                          {c.role && <div><dt className="inline font-semibold">Role: </dt><dd className="inline text-ink">{c.role}</dd></div>}
-                          {(start || end) && (
-                            <div><dt className="inline font-semibold">Dates: </dt><dd className="inline text-ink">{start ?? '?'} – {end ?? '?'}</dd></div>
-                          )}
-                        </dl>
+            <div className="grid gap-8">
+              {groupCoursesBySemester(status.courses).map((section) => (
+                <section key={section.key} aria-labelledby={`sem-${section.key}`}>
+                  <h2 id={`sem-${section.key}`} className="eyebrow mb-3">{section.title}</h2>
+                  {section.key === 'unconfirmed' && (
+                    <p className="text-xs text-muted mb-3 leading-relaxed">
+                      These course codes have a term prefix that hasn't been confirmed in{' '}
+                      <code className="font-mono text-ink">src/config/semesterTerms.ts</code>, so they aren't labeled current or past yet.
+                    </p>
+                  )}
+                  <div className="grid gap-5">
+                    {section.groups.map((group) => (
+                      <div key={group.key}>
+                        {section.key !== 'other' && (
+                          <h3 className="text-sm font-bold text-ink mb-2">{group.label}</h3>
+                        )}
+                        <ul className="grid gap-3">
+                          {group.courses.map((c) => (
+                            <CourseCard
+                              key={c.id}
+                              course={c}
+                              semesterLabel={group.label}
+                              selectedCount={Object.keys(selections[c.id] ?? {}).length}
+                              onOpen={() => {
+                                setOpen({ course: c, semesterLabel: group.label });
+                                window.scrollTo({ top: 0 });
+                              }}
+                            />
+                          ))}
+                        </ul>
                       </div>
-                      <div className="flex gap-2 shrink-0">
-                        {c.canAccess === true ? <Badge tone="success">Can access</Badge> : c.canAccess === false ? <Badge tone="warning">No access</Badge> : <Badge tone="muted">Access unknown</Badge>}
-                        {c.isActive === true ? <Badge tone="success">Active</Badge> : c.isActive === false ? <Badge tone="muted">Inactive</Badge> : null}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
           </>
         )}
       </div>
     </div>
+  );
+};
+
+const CourseCard: React.FC<{ course: Course; semesterLabel: string; selectedCount: number; onOpen: () => void }> = ({
+  course: c, semesterLabel, selectedCount, onOpen,
+}) => {
+  const start = formatDate(c.startDate);
+  const end = formatDate(c.endDate);
+  const canOpen = c.canAccess !== false;
+  const body = (
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div className="min-w-0">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-gold-soft text-gold-ink text-[11px] font-bold mb-1.5">
+            {semesterLabel}
+          </span>
+          <h4 className="font-bold text-ink leading-snug break-words">{c.name}</h4>
+          <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
+            <div><dt className="inline font-semibold">Code: </dt><dd className="inline font-mono text-ink">{c.code ?? '—'}</dd></div>
+            <div><dt className="inline font-semibold">ID: </dt><dd className="inline font-mono text-ink">{c.id}</dd></div>
+            {c.role && <div><dt className="inline font-semibold">Role: </dt><dd className="inline text-ink">{c.role}</dd></div>}
+            {(start || end) && (
+              <div><dt className="inline font-semibold">Dates: </dt><dd className="inline text-ink">{start ?? '?'} – {end ?? '?'}</dd></div>
+            )}
+          </dl>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          {c.canAccess === true ? <Badge tone="success">Can access</Badge> : c.canAccess === false ? <Badge tone="warning">No access</Badge> : <Badge tone="muted">Access unknown</Badge>}
+          {c.isActive === true ? <Badge tone="success">Active</Badge> : c.isActive === false ? <Badge tone="muted">Inactive</Badge> : null}
+          {canOpen && <ChevronRight size={20} className="text-muted self-center hidden sm:block" aria-hidden="true" />}
+        </div>
+      </div>
+  );
+  return (
+    <li>
+      {canOpen ? (
+        <div className="relative surface rounded-xl p-5 border-l-4 border-l-cardinal transition-shadow hover:shadow-raised has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-cardinal">
+          {body}
+          {/* Stretched button: the whole card is clickable, markup stays valid. */}
+          <button
+            type="button"
+            onClick={onOpen}
+            className="mt-3 text-xs font-semibold text-cardinal text-left focus:outline-none after:absolute after:inset-0 after:rounded-xl after:content-['']"
+            aria-label={`Open ${c.name} course content${selectedCount > 0 ? `, ${selectedCount} selected` : ''}`}
+          >
+            Browse course content{selectedCount > 0 ? ` · ${selectedCount} selected` : ''}
+          </button>
+        </div>
+      ) : (
+        <div className="surface rounded-xl p-5 border-l-4 border-l-line-strong opacity-80">
+          {body}
+          <p className="mt-3 text-xs text-muted">Brightspace reports this course isn't accessible, so its content can't be opened.</p>
+        </div>
+      )}
+    </li>
   );
 };
 

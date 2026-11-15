@@ -3,8 +3,8 @@ import Navbar from './components/Navbar';
 import Hero from './components/Hero';
 import Features from './components/Features';
 import HowItWorks from './components/HowItWorks';
-import WhyDifferent from './components/WhyDifferent';
 import FinalCTA from './components/FinalCTA';
+import { HOME_TABS } from './components/homeTabs';
 import ReasoningChallenge from './components/ReasoningChallenge';
 import { StudySchedule } from './components/StudySchedule';
 import { StudyReport } from './components/StudyReport';
@@ -50,8 +50,21 @@ const App: React.FC = () => {
     }
   }, [setSession]);
 
-  const goToUpload = () => setActiveTab(1);
-  
+  // Homepage links: switch tab and start the new page at the top.
+  const navigateFromHome = (tab: number) => {
+    setActiveTab(tab);
+    window.scrollTo({ top: 0 });
+  };
+
+  const exploreFeatures = () => {
+    const section = document.getElementById('features');
+    if (!section) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    section.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    // Move keyboard focus to the section heading without a second scroll jump.
+    document.getElementById('features-title')?.focus({ preventScroll: true });
+  };
+
   const handleStartChallenge = async (fileName: string = "Manual Upload") => {
     if (!uploadedContent.trim()) {
       console.warn("[App-Step.Abort] Cannot start challenge: uploadedContent is empty.");
@@ -90,11 +103,14 @@ const App: React.FC = () => {
       <main>
         {activeTab === 0 && (
           <div className="animate-fade-in">
-            <Hero onStart={goToUpload} />
-            <Features />
+            {/* "Get Started" mirrors the navbar's Get Started (Upload tab). */}
+            <Hero onGetStarted={() => navigateFromHome(HOME_TABS.upload)} onExploreFeatures={exploreFeatures} />
+            <Features onNavigate={navigateFromHome} />
             <HowItWorks />
-            <WhyDifferent />
-            <FinalCTA onUpload={goToUpload} />
+            <FinalCTA
+              onCourses={() => navigateFromHome(HOME_TABS.courses)}
+              onUpload={() => navigateFromHome(HOME_TABS.upload)}
+            />
             <footer className="py-10 px-4 border-t border-line bg-surface">
               <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-muted">
                 <div className="flex items-center gap-2">

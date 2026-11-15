@@ -202,6 +202,134 @@ body {
 
 @keyframes ep-spin { to { transform: rotate(360deg); } }
 
+/* ── Homepage (feature showcase) ──────────────────────────────────────────── */
+:root {
+  --tm-charcoal: #1d1919;
+  --tm-charcoal-deep: #141111;
+  --tm-on-dark: #faf6ef;          /* warm white */
+  --tm-on-dark-muted: #cfc5ba;    /* ≥ 7:1 on charcoal */
+}
+
+.tm-hero {
+  background: var(--tm-charcoal);
+  color: var(--tm-on-dark);
+}
+.tm-hero-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 204, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 204, 0, 0.06) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse at 70% 40%, #000 0%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at 70% 40%, #000 0%, transparent 70%);
+}
+.tm-hero-wash {
+  background:
+    radial-gradient(60% 70% at 78% 30%, rgba(153, 0, 0, 0.38), transparent 70%),
+    linear-gradient(to bottom, transparent 70%, var(--tm-charcoal-deep));
+}
+/* Gold focus ring reads better than cardinal on dark surfaces */
+.tm-hero :focus-visible,
+.tm-cta :focus-visible {
+  outline-color: var(--color-gold);
+}
+
+.tm-btn-gold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--color-gold);
+  color: var(--tm-charcoal);
+  border: 1px solid var(--color-gold);
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.tm-btn-gold:hover { background: #ffd633; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); }
+.tm-btn-gold:active { transform: translateY(1px); }
+
+.tm-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--tm-on-dark);
+  border: 1px solid rgba(250, 246, 239, 0.28);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.tm-btn-ghost:hover { border-color: var(--color-gold); background: rgba(255, 204, 0, 0.06); }
+
+/* Hero artwork motion */
+@keyframes tm-float {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-12px); }
+}
+@keyframes tm-trace { to { stroke-dashoffset: 0; } }
+@keyframes tm-orbit { to { stroke-dashoffset: -100; } }
+
+.tm-float { animation: tm-float 7s ease-in-out infinite alternate; }
+.tm-trace {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: tm-trace 2.6s cubic-bezier(0.65, 0, 0.35, 1) 0.3s forwards;
+}
+.tm-trace-delay { animation-delay: 0.9s; }
+.tm-orbit {
+  transform-origin: 200px 222px;
+  animation: tm-orbit 26s linear infinite;
+}
+
+/* Keep "Explore Features" clear of the sticky navbar */
+.tm-anchor { scroll-margin-top: 4.5rem; }
+
+/* Feature cards */
+.tm-feature {
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.tm-feature:hover,
+.tm-feature:focus-within {
+  border-color: color-mix(in srgb, var(--color-gold) 55%, var(--color-line));
+  box-shadow: var(--shadow-raised);
+}
+.tm-feature-line {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(to right, var(--color-cardinal), var(--color-gold));
+  transform: scaleX(0.18);
+  transform-origin: left;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tm-feature:hover .tm-feature-line,
+.tm-feature:focus-within .tm-feature-line { transform: scaleX(1); }
+
+/* How-it-works connector */
+@keyframes tm-connector { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.tm-connector {
+  background: linear-gradient(to right, var(--color-gold), var(--color-cardinal) 50%, var(--color-gold));
+  opacity: 0.55;
+  transform-origin: left;
+  animation: tm-connector 1.6s cubic-bezier(0.65, 0, 0.35, 1) 0.2s both;
+}
+
+/* Final CTA */
+.tm-cta {
+  background:
+    radial-gradient(80% 120% at 100% 0%, rgba(153, 0, 0, 0.55), transparent 60%),
+    var(--tm-charcoal);
+  border: 1px solid rgba(255, 204, 0, 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tm-float, .tm-orbit, .tm-connector { animation: none !important; }
+  .tm-orbit { display: none; }
+  .tm-trace { animation: none !important; stroke-dashoffset: 0; }
+  .tm-feature-line { transition: none; }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--color-canvas); }

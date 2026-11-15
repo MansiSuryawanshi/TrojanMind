@@ -1,7 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { useAuth } from '../auth/useAuth';
-import { BrightspaceContext, NOT_OWNER_MESSAGE, type BrightspaceStatus, type Course } from './brightspaceContext';
+import {
+  BrightspaceContext,
+  NOT_OWNER_MESSAGE,
+  type BrightspaceContextValue,
+  type BrightspaceStatus,
+  type Course,
+  type CourseContentResult,
+  type CourseSelection,
+  type SelectedMaterial,
+  type UsedMaterials,
+} from './brightspaceContext';
+import { courseContentEndpoint, toCourseContent } from './contentApi';
 
 // Proxied by the Vite dev server to the localhost-only connector (server/index.ts).
 const CONNECT_ENDPOINT = '/local-api/brightspace/connect';
@@ -102,11 +113,65 @@ const Inner: React.FC<{ user: User; children: React.ReactNode }> = ({ user, chil
     };
   }, [connect]);
 
-  const value = useMemo(() => ({ status, connect }), [status, connect]);
+  const fetchCourseContent = useCallback(async (courseId: number, signal?: AbortSignal): Promise<CourseContentResult> => {
+    let res: Response;
+    let json: unknown = null;
+    try {
+      const token = await userRef.current.getIdToken();
+      res = await fetch(courseContentEndpoint(courseId), {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+        signal,
+      });
+      if ((res.headers.get('content-type') ?? '').includes('application/json')) json = await res.json().catch(() => null);
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      return { ok: false, kind: 'error', code: 'unreachable', message: '' };
+    }
+    if (!json || typeof json !== 'object') return { ok: false, kind: 'error', code: 'unreachable', message: '' };
+    if (res.ok) {
+      const content = toCourseContent(json, courseId);
+      return content
+        ? { ok: true, content }
+        : { ok: false, kind: 'error', code: 'bad_response', message: 'The connector returned course content in an unexpected format.' };
+    }
+    const err = ((json as Record<string, unknown>).error ?? {}) as Record<string, unknown>;
+    const code = asString(err.code, `http_${res.status}`);
+    const message = code === 'not_owner' ? NOT_OWNER_MESSAGE : asString(err.message, 'The connector returned an error.');
+    if (code === 'brightspace_action_required') return { ok: false, kind: 'action_required', code, message };
+    if (code === 'brightspace_pending') return { ok: false, kind: 'pending', code, message };
+    return { ok: false, kind: 'error', code, message };
+  }, []);
+
+  // Selections live only in memory inside this per-UID provider: separate per
+  // course, and discarded on logout or account switch (the provider unmounts).
+  const [selections, setSelections] = useState<Record<number, CourseSelection>>({});
+  const [usedMaterials, setUsedMaterials] = useState<Record<number, UsedMaterials>>({});
+
+  const setCourseSelection = useCallback((courseId: number, update: (prev: CourseSelection) => CourseSelection) => {
+    setSelections((all) => ({ ...all, [courseId]: update(all[courseId] ?? {}) }));
+  }, []);
+
+  const saveUsedMaterials = useCallback((courseId: number, items: SelectedMaterial[]) => {
+    setUsedMaterials((all) => ({ ...all, [courseId]: { courseId, items, savedAt: new Date().toISOString() } }));
+  }, []);
+
+  const value = useMemo<BrightspaceContextValue>(
+    () => ({ status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials }),
+    [status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials],
+  );
   return <BrightspaceContext.Provider value={value}>{children}</BrightspaceContext.Provider>;
 };
 
-const SIGNED_OUT_VALUE = { status: { kind: 'idle' } as BrightspaceStatus, connect: () => undefined };
+const SIGNED_OUT_VALUE: BrightspaceContextValue = {
+  status: { kind: 'idle' },
+  connect: () => undefined,
+  fetchCourseContent: async () => ({ ok: false, kind: 'error', code: 'signed_out', message: 'Sign in to TrojanMind first.' }),
+  selections: {},
+  setCourseSelection: () => undefined,
+  usedMaterials: {},
+  saveUsedMaterials: () => undefined,
+};
 
 /**
  * Brightspace connection state for the signed-in user. Mounted inside

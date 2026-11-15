@@ -149,14 +149,15 @@ ANTHROPIC_API_KEY=your_api_key_here
 
 **4. Run the project**
 
-Frontend:
+Frontend and local connector together (labeled output; Ctrl+C stops both):
 ```bash
 npm run dev
 ```
 
-Backend:
+Or run them separately:
 ```bash
-node server.js
+npm run dev:client   # Vite frontend
+npm run server       # local connector (loads server/.env.local)
 ```
 
 ---

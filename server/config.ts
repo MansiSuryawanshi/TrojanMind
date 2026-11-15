@@ -30,6 +30,13 @@ export const OWNER_UID = trimmed('LOCAL_BRIGHTSPACE_OWNER_UID');
 export const EXPECTED_UNIQUE_NAME = trimmed('LOCAL_BRIGHTSPACE_EXPECTED_UNIQUE_NAME');
 
 /**
+ * Optional: Brightspace site origin (e.g. https://brightspace.usc.edu) used to
+ * resolve relative links in course content. Defaults to the school URL the
+ * local connector is configured with (get_server_info). Not a secret.
+ */
+export const BRIGHTSPACE_BASE_URL = trimmed('BRIGHTSPACE_BASE_URL');
+
+/**
  * Optional: path to a Firebase Admin service-account JSON (standard Google
  * env var). When present we also reject revoked tokens. Never commit it.
  */

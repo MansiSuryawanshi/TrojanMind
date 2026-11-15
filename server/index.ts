@@ -26,11 +26,14 @@ import {
 import {
   ConnectorError,
   closeConnector,
+  getBrightspaceOrigin,
+  getCourseContent,
   getMyCourses,
   getSignedInUniqueName,
   signIn,
   type AuthState,
   type BrightspaceCourse,
+  type CourseContent,
 } from './brightspaceMcp.ts';
 
 if (!FIREBASE_PROJECT_ID) {
@@ -146,6 +149,33 @@ async function loadVerifiedCourses(): Promise<BrightspaceCourse[]> {
   return courses;
 }
 
+/** Strict positive integer course ID from a path segment. */
+function parseCourseId(segment: string): number {
+  if (!/^[1-9]\d{0,14}$/.test(segment)) throw new HttpError(400, 'invalid_course_id', 'That course ID isn’t valid.');
+  const id = Number(segment);
+  if (!Number.isSafeInteger(id)) throw new HttpError(400, 'invalid_course_id', 'That course ID isn’t valid.');
+  return id;
+}
+
+/**
+ * Content for one course, only if it's among the verified user's accessible
+ * courses. Identity is re-checked after reading, as for the course list.
+ */
+async function loadVerifiedCourseContent(courseId: number): Promise<{ course: BrightspaceCourse; content: CourseContent }> {
+  const courses = await loadVerifiedCourses();
+  const course = courses.find((c) => c.id === courseId);
+  if (!course) {
+    throw new HttpError(404, 'course_not_found', 'This course isn’t in your Brightspace course list, so its content wasn’t requested.');
+  }
+  if (course.canAccess === false) {
+    throw new HttpError(403, 'course_no_access', 'Brightspace reports this course isn’t accessible to your account right now.');
+  }
+  const origin = await getBrightspaceOrigin();
+  const content = await getCourseContent(courseId, origin);
+  await requireExpectedIdentity();
+  return { course, content };
+}
+
 // ── Connect flow (single-flight) ────────────────────────────────────────────
 
 type ConnectResult =
@@ -215,6 +245,19 @@ const server = createServer(async (req, res) => {
       await requireOwner(req);
       const courses = await loadVerifiedCourses();
       return send(res, 200, { courses, retrievedAt: new Date().toISOString() }, origin);
+    }
+
+    // Module/topic tree for one of the user's accessible courses.
+    const contentMatch = /^\/brightspace\/courses\/([^/]+)\/content$/.exec(url.pathname);
+    if (req.method === 'GET' && contentMatch) {
+      await requireOwner(req);
+      const courseId = parseCourseId(contentMatch[1]);
+      const { course, content } = await loadVerifiedCourseContent(courseId);
+      return send(res, 200, {
+        course: { id: course.id, name: course.name, code: course.code },
+        ...content,
+        retrievedAt: new Date().toISOString(),
+      }, origin);
     }
 
     return sendError(res, new HttpError(404, 'not_found', 'Not found.'), origin);
