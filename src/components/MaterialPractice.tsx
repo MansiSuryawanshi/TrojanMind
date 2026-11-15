@@ -12,6 +12,11 @@ import {
   saveRevisionTask,
 } from '../services/firebaseService';
 import { generatePracticeFromDocument } from '../services/summaryService';
+import {
+  ADMIN_ONLY_MESSAGE,
+  isAcademicTopicName,
+  isAdministrativeOnlyError,
+} from '../services/contentClassification';
 import { evaluateShortAnswer } from '../services/claudeService';
 import { useStore } from '../store/store';
 import QuizQuestion from './QuizQuestion';
@@ -78,10 +83,15 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
       topic?: string | null;
       confidence: number;
       sourcePage?: number;
+      /** No answer given before the timer ran out. */
+      unanswered: boolean;
     }[]
   >([]);
 
   const [error, setError] = useState<string | null>(null);
+  /** The selected material only holds course logistics. */
+  const [adminOnly, setAdminOnly] = useState(false);
+  const [policyMode, setPolicyMode] = useState(false);
   const [mistakes, setMistakes] = useState<MistakeEntry[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -131,10 +141,12 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
     setTypes((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
   };
 
-  const startArena = async (weakOnly = false) => {
+  const startArena = async (weakOnly = false, focus: 'academic' | 'course_policies' = 'academic') => {
     if (!docId) return;
     setFromMistakes(weakOnly);
+    setPolicyMode(focus === 'course_policies');
     setError(null);
+    setAdminOnly(false);
     setPhase('loading');
     setGraded([]);
     setCurrentIndex(0);
@@ -153,27 +165,30 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
       let diff = difficulty;
       if (weakOnly) {
         const weak = mistakes
-          .filter((m) => !m.reviewed && m.conceptMisunderstood)
+          .filter((m) => !m.reviewed && isAcademicTopicName(m.conceptMisunderstood))
           .map((m) => m.conceptMisunderstood!)
           .slice(0, 5);
         topicList = weak.length ? weak : topicList;
         diff = 'easy';
       } else if (!topicList.length && weakAreas.length) {
-        topicList = weakAreas.slice(0, 3);
+        topicList = weakAreas.filter(isAcademicTopicName).slice(0, 3);
       }
+      if (focus === 'course_policies') topicList = [];
 
       const qs = await generatePracticeFromDocument(document, {
         topics: topicList,
         difficulty: diff,
         count,
         types,
+        focus,
       });
 
-      if (!qs.length) throw new Error('No questions generated. Try again.');
+      if (!qs.length) throw new Error('No questions could be generated from this material. Try again.');
       setQuestions(qs as PracticeQuestion[]);
       setPhase('quiz');
     } catch (e: any) {
-      setError(e?.message || 'Failed to generate practice');
+      if (isAdministrativeOnlyError(e)) setAdminOnly(true);
+      else setError(e?.message || 'Failed to generate practice');
       setPhase('setup');
     }
   };
@@ -203,6 +218,7 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
     if (timerRef.current) clearInterval(timerRef.current);
 
     const g = await gradeAnswer(q, userAnswer);
+    const unanswered = !userAnswer.trim();
     const entry = {
       questionId: q.id,
       questionText: q.question,
@@ -214,12 +230,14 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
       topic: q.sourceTopic || null,
       confidence: conf,
       sourcePage: q.sourcePage,
+      unanswered,
     };
 
     const nextGraded = [...graded, entry];
     setGraded(nextGraded);
 
-    if (!g.isCorrect) {
+    // Unanswered questions aren't misconceptions; only log answers that were wrong.
+    if (!g.isCorrect && !unanswered) {
       await saveMistake({
         documentId: docId,
         question: q.question,
@@ -269,11 +287,14 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
       const correctCount = finalGraded.filter((r) => r.isCorrect).length;
       const accuracy = Math.round((correctCount / Math.max(finalGraded.length, 1)) * 100);
       const selected = docs.find((d) => d.id === docId);
+      // Weak/strong topics: answered questions on academic concepts only.
       const weakTopics = [
-        ...new Set(finalGraded.filter((r) => !r.isCorrect && r.topic).map((r) => r.topic!)),
+        ...new Set(
+          finalGraded.filter((r) => !r.isCorrect && !r.unanswered && isAcademicTopicName(r.topic)).map((r) => r.topic!)
+        ),
       ];
       const strongTopics = [
-        ...new Set(finalGraded.filter((r) => r.isCorrect && r.topic).map((r) => r.topic!)),
+        ...new Set(finalGraded.filter((r) => r.isCorrect && isAcademicTopicName(r.topic)).map((r) => r.topic!)),
       ];
 
       const attemptId = await saveQuizAttempt({
@@ -294,6 +315,7 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
           explanation: r.explanation,
           feedback: r.feedback,
           topic: r.topic,
+          unanswered: r.unanswered,
         })),
         weakTopics,
         strongTopics,
@@ -322,6 +344,7 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
               explanation: r.explanation,
               feedback: r.feedback,
               topic: r.topic,
+              unanswered: r.unanswered,
             })),
             weakTopics,
             strongTopics,
@@ -348,17 +371,22 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
     setMistakes(await listMistakes());
   };
 
-  const scheduleWeak = async (topic: string) => {
+  const scheduleWeak = async (topic: string, question: string, sourcePage?: number) => {
     const today = new Date();
     today.setDate(today.getDate() + 1);
     const date = today.toISOString().slice(0, 10);
+    const fileName = docs.find((d) => d.id === docId)?.fileName;
+    const where = fileName ? `${sourcePage ? `page ${sourcePage} of ` : ''}${fileName}` : 'your notes';
     const task = {
       topic,
       documentId: docId || undefined,
-      fileName: docs.find((d) => d.id === docId)?.fileName,
+      fileName,
       date,
-      durationMinutes: 40,
+      // An estimate; it can be changed on the Study Schedule.
+      durationMinutes: 30,
       source: 'exam_prep' as const,
+      studyFocus: `Re-read the part of ${where} that covers “${topic}”, then answer this question again without notes: “${question}”`,
+      suggestionReason: `You answered a question on “${topic}” incorrectly in practice today.`,
     };
     const id = await saveRevisionTask(task);
     addRevisionTaskLocal({ ...task, id, createdAt: null });
@@ -526,7 +554,8 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
           <div className="text-6xl font-extrabold text-cardinal mb-2">{accuracy}%</div>
           <p className="text-muted font-medium mb-6">
             {correctCount} / {graded.length} correct
-            {fromMistakes ? ' · weak-area drill' : ' · material practice'}
+            {graded.some((r) => r.unanswered) ? ` · ${graded.filter((r) => r.unanswered).length} unanswered` : ''}
+            {policyMode ? ' · course policies' : fromMistakes ? ' · weak-area drill' : ' · material practice'}
           </p>
           <div className="flex flex-wrap justify-center gap-3">
             <button
@@ -557,7 +586,9 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
               className={`rounded-xl border p-4 text-sm ${
                 r.isCorrect
                   ? 'bg-success-soft/40 border-success/30'
-                  : 'bg-danger-soft/40 border-danger/30'
+                  : r.unanswered
+                    ? 'bg-sunken border-line'
+                    : 'bg-danger-soft/40 border-danger/30'
               }`}
             >
               <div className="font-bold text-ink mb-1 flex items-center gap-2">
@@ -570,17 +601,17 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
                 <span className="text-xs font-normal text-muted">· confidence {r.confidence}%</span>
               </div>
               <p className="text-ink mb-2">{r.questionText}</p>
-              <p className={r.isCorrect ? 'text-success' : 'text-danger'}>
-                Your answer: {r.userAnswer || '(blank)'}
+              <p className={r.isCorrect ? 'text-success' : r.unanswered ? 'text-muted' : 'text-danger'}>
+                {r.unanswered ? 'Unanswered (time ran out)' : `Your answer: ${r.userAnswer}`}
               </p>
               {!r.isCorrect && (
                 <p className="text-ink mt-1">Correct: {r.correctAnswer}</p>
               )}
               <p className="text-muted mt-1">{r.feedback}</p>
-              {r.topic && !r.isCorrect && (
+              {r.topic && !r.isCorrect && !r.unanswered && isAcademicTopicName(r.topic) && (
                 <button
                   type="button"
-                  onClick={() => void scheduleWeak(r.topic!)}
+                  onClick={() => void scheduleWeak(r.topic!, r.questionText, r.sourcePage)}
                   className="mt-2 text-xs font-bold text-info"
                 >
                   Add “{r.topic}” to Study Schedule
@@ -720,6 +751,23 @@ export const MaterialPractice: React.FC<MaterialPracticeProps> = ({
         {error && (
           <div className="mt-4 text-sm text-danger flex items-center gap-2">
             <AlertTriangle className="w-4 h-4" /> {error}
+          </div>
+        )}
+
+        {adminOnly && (
+          <div className="mt-4 rounded-xl border border-info/25 bg-info-soft px-4 py-3 text-sm text-ink" role="status">
+            <p className="font-semibold">{ADMIN_ONLY_MESSAGE}</p>
+            <p className="text-muted mt-1">
+              You can still practice the course rules (deadlines, grading, attendance). Those results stay separate from
+              your topic practice.
+            </p>
+            <button
+              type="button"
+              onClick={() => void startArena(false, 'course_policies')}
+              className="btn-secondary mt-3 px-4 py-2 rounded-lg text-sm font-semibold"
+            >
+              Quiz me on course policies
+            </button>
           </div>
         )}
       </div>

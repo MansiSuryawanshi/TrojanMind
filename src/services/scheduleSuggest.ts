@@ -1,10 +1,12 @@
 /**
  * Local coaching suggestions for "Add to Study Schedule".
- * Uses readiness colors + existing tasks + summary topic order.
+ * Uses quiz evidence + existing tasks + summary topic order.
  * All suggested dates are clamped to on/before the exam date.
  */
 import type { TopicProgress } from '../types';
 import type { RevisionTask, StructuredSummary } from '../types/summary';
+import { buildSummaryView, isAcademicTopicName } from './contentClassification';
+import { topicEvidence } from './analyticsService';
 
 export interface ScheduleSuggestion {
   date: string;
@@ -60,7 +62,7 @@ export function clampToExamWindow(date: Date, examDate: string | null, today = s
   return d;
 }
 
-function bandFor(pct: number | undefined): ScheduleSuggestion['band'] {
+function bandFor(pct: number | null | undefined): ScheduleSuggestion['band'] {
   if (pct == null) return 'unknown';
   if (pct > 75) return 'strong';
   if (pct >= 50) return 'moderate';
@@ -93,8 +95,9 @@ export function planningDayCount(daysLeft: number | null, examDate: string | nul
 }
 
 /**
- * Suggest when/how long/in what order to study `topic`.
- * Never suggests a date after the exam.
+ * Suggest when, roughly how long, and in what order to study `topic`.
+ * Never suggests a date after the exam. Durations are estimates the student
+ * edits; the reason cites quiz evidence when there is some.
  */
 export function suggestSchedulePlacement(opts: {
   topic: string;
@@ -103,54 +106,52 @@ export function suggestSchedulePlacement(opts: {
   revisionTasks: RevisionTask[];
   daysLeft: number | null;
   examDate: string | null;
+  /** Material the topic comes from, used to name a concrete activity. */
+  fileName?: string | null;
 }): ScheduleSuggestion {
-  const { topic, summary, topicProgress, revisionTasks, daysLeft, examDate } = opts;
+  const { topic, summary, topicProgress, revisionTasks, daysLeft, examDate, fileName } = opts;
   const today = startOfDay(new Date());
   const exam = examDate ? parseIso(examDate) : null;
   const latestDate = exam ? isoDate(exam) : null;
 
+  const assessed = topicProgress.filter((p) => p.percentage != null);
   const matched = fuzzyMatchProgress(topic, topicProgress);
-  const band = bandFor(matched?.percentage);
-  const pct = matched?.percentage;
+  const pct = matched?.percentage ?? null;
+  const band = bandFor(pct);
 
-  // Duration by color / urgency
-  let durationMinutes = 45;
   let priority: ScheduleSuggestion['priority'] = 'medium';
-  if (band === 'weak' || (daysLeft != null && daysLeft <= 3)) {
-    durationMinutes = 60;
-    priority = 'high';
-  } else if (band === 'moderate') {
-    durationMinutes = 45;
-    priority = 'medium';
-  } else if (band === 'strong') {
-    durationMinutes = 25;
-    priority = 'low';
-  }
+  if (band === 'weak') priority = 'high';
+  else if (band === 'strong') priority = 'low';
+  if (daysLeft != null && daysLeft <= 3 && band !== 'strong') priority = 'high';
 
-  // Topic order from summary
-  const summaryTitles = (summary?.topics || []).map((t) => t.title).filter(Boolean);
+  // A starting estimate only; the student sets the real length.
+  const durationMinutes = 30;
+
+  // Topic order from the summary (academic topics only).
+  const summaryTopics = summary ? buildSummaryView(summary).academicTopics : [];
+  const summaryTitles = summaryTopics.map((t) => t.title).filter(Boolean);
   const idx = summaryTitles.findIndex((t) => t.toLowerCase() === topic.toLowerCase());
   const prevFromSummary = idx > 0 ? summaryTitles[idx - 1] : null;
-  const nextFromSummary =
-    idx >= 0 && idx < summaryTitles.length - 1 ? summaryTitles[idx + 1] : null;
+  const nextFromSummary = idx >= 0 && idx < summaryTitles.length - 1 ? summaryTitles[idx + 1] : null;
 
-  const weaker = [...topicProgress]
-    .filter((p) => p.percentage < (pct ?? 40) && p.name.toLowerCase() !== topic.toLowerCase())
-    .sort((a, b) => a.percentage - b.percentage);
+  const weaker = assessed
+    .filter((p) => (p.percentage as number) < (pct ?? 40) && p.name.toLowerCase() !== topic.toLowerCase())
+    .sort((a, b) => (a.percentage as number) - (b.percentage as number));
 
   const afterTopic =
     weaker[0]?.name ||
     prevFromSummary ||
-    revisionTasks.filter((t) => t.topic.toLowerCase() !== topic.toLowerCase()).slice(-1)[0]
-      ?.topic ||
+    revisionTasks
+      .filter((t) => t.topic.toLowerCase() !== topic.toLowerCase() && isAcademicTopicName(t.topic))
+      .slice(-1)[0]?.topic ||
     null;
 
   const nextTopic =
     nextFromSummary ||
-    [...topicProgress]
+    assessed
       .filter((p) => p.name.toLowerCase() !== topic.toLowerCase())
-      .sort((a, b) => a.percentage - b.percentage)
-      .find((p) => p.percentage >= (pct ?? 0))?.name ||
+      .sort((a, b) => (a.percentage as number) - (b.percentage as number))
+      .find((p) => (p.percentage as number) >= (pct ?? 0))?.name ||
     null;
 
   const afterTask = afterTopic
@@ -161,84 +162,57 @@ export function suggestSchedulePlacement(opts: {
     : null;
 
   let suggested = addDays(today, priority === 'high' ? 0 : priority === 'medium' ? 1 : 2);
-
   if (afterTask?.date) {
     const afterDate = parseIso(afterTask.date);
     if (afterDate) suggested = addDays(afterDate, 1);
   }
-
-  if (daysLeft != null && daysLeft <= 2) {
-    suggested = today;
-    durationMinutes = Math.max(durationMinutes, 50);
-  }
-
+  if (daysLeft != null && daysLeft <= 2) suggested = today;
   suggested = clampToExamWindow(suggested, examDate, today);
-
   const date = isoDate(suggested);
 
   // Alt dates: only within today → exam (inclusive)
   const windowDays = planningDayCount(daysLeft, examDate);
-  const rawAlts: { date: string; label: string }[] = [
-    { date: isoDate(today), label: 'Today' },
-  ];
+  const rawAlts: { date: string; label: string }[] = [{ date: isoDate(today), label: 'Today' }];
   if (windowDays > 1) {
     rawAlts.push({ date: isoDate(clampToExamWindow(addDays(today, 1), examDate, today)), label: 'Tomorrow' });
   }
   if (windowDays > 2) {
-    rawAlts.push({
-      date: isoDate(clampToExamWindow(addDays(today, 2), examDate, today)),
-      label: 'In 2 days',
-    });
+    rawAlts.push({ date: isoDate(clampToExamWindow(addDays(today, 2), examDate, today)), label: 'In 2 days' });
   }
   if (exam && isoDate(exam) !== isoDate(today)) {
     rawAlts.push({ date: isoDate(exam), label: 'Exam day' });
   }
-
   const altDates = rawAlts.filter(
-    (a, i, arr) =>
-      arr.findIndex((x) => x.date === a.date) === i &&
-      (!exam || a.date <= isoDate(exam))
+    (a, i, arr) => arr.findIndex((x) => x.date === a.date) === i && (!exam || a.date <= isoDate(exam))
   );
+  const altDurations = [15, 30, 45, 60];
 
-  const altDurations = [...new Set([25, 45, 60, 90, durationMinutes])].sort((a, b) => a - b);
-
-  const bandLabel =
-    band === 'weak'
-      ? `red / weak${pct != null ? ` (${pct}%)` : ''}`
-      : band === 'moderate'
-        ? `amber / moderate${pct != null ? ` (${pct}%)` : ''}`
-        : band === 'strong'
-          ? `green / strong${pct != null ? ` (${pct}%)` : ''}`
-          : 'not yet scored';
-
+  // Why: quiz evidence when there is some, otherwise say plainly it's untested.
   const reasonParts: string[] = [];
-  if (afterTopic) {
-    reasonParts.push(`Do this after “${afterTopic}” so prerequisites / weaker gaps come first.`);
+  if (matched && (matched.answered ?? 0) > 0) {
+    reasonParts.push(`Quiz evidence for “${topic}”: ${topicEvidence(matched)}.`);
+  } else if (matched && (matched.unanswered ?? 0) > 0) {
+    reasonParts.push(`“${topic}” hasn’t been assessed yet: the quiz questions on it were left unanswered.`);
   } else {
-    reasonParts.push('No prior topic required — you can open with this block.');
+    reasonParts.push(`“${topic}” hasn’t been quizzed yet, so this is a first pass rather than a fix for a known gap.`);
   }
-  reasonParts.push(`Suggested ${durationMinutes} min because coverage is ${bandLabel}.`);
-  if (examDate) {
-    reasonParts.push(`Scheduled on/before your exam (${examDate}) — nothing after exam day.`);
-  } else if (daysLeft != null) {
-    reasonParts.push(
-      daysLeft <= 3
-        ? `Only ${daysLeft} day(s) to exam — schedule sooner and longer.`
-        : `${daysLeft} days to exam — keep red → amber → green order.`
-    );
-  } else {
-    reasonParts.push('Set an exam date on Exam Prep so plans stay inside the exam window.');
-  }
-  if (nextTopic) {
-    reasonParts.push(`After this, move to “${nextTopic}”.`);
-  }
+  if (afterTopic) reasonParts.push(`Do it after “${afterTopic}”${weaker[0]?.name === afterTopic ? ', which scored lower' : ', which comes first in the material'}.`);
+  if (examDate) reasonParts.push(`Placed on or before your exam (${examDate}).`);
+  else reasonParts.push('Set an exam date on Exam Prep so plans stop on exam day.');
+  if (nextTopic) reasonParts.push(`Then move on to “${nextTopic}”.`);
 
+  // What to do: a concrete activity grounded in the available material.
+  const source = summaryTopics.find((t) => t.title.toLowerCase() === topic.toLowerCase());
+  const pages = source?.sourcePages?.length ? `page${source.sourcePages.length === 1 ? '' : 's'} ${source.sourcePages.join(', ')}` : null;
+  const where = fileName ? (pages ? `${pages} of ${fileName}` : fileName) : pages || 'your notes';
+  const hasExample = Boolean(source?.examples?.length);
+  const missed = matched ? Math.max(0, (matched.answered ?? 0) - (matched.correct ?? 0)) : 0;
   const studyFocus =
-    band === 'weak'
-      ? `Rebuild foundations for “${topic}”: definitions, procedures, then 3 practice questions.`
-      : band === 'moderate'
-        ? `Strengthen “${topic}”: revisit notes, one online article, then a short self-quiz.`
-        : `Quick maintain “${topic}”: 10-min recall + one stretch question, then return to red gaps.`;
+    band === 'weak' || missed > 0
+      ? `Re-read ${where} on “${topic}”, write the key ideas from memory, then redo the ${missed > 1 ? `${missed} questions` : 'question'} you missed and check why the right answer is right.`
+      : band === 'unknown'
+        ? `Read ${where} on “${topic}”, then explain it in your own words${hasExample ? ' and rework the example from the material' : ''} without looking.`
+        : `Quick check on “${topic}”: explain it from memory, then compare with ${where}.`;
 
   return {
     date,

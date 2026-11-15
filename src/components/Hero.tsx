@@ -1,64 +1,141 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion';
 import { ArrowDown, ArrowRight } from 'lucide-react';
-import TrojanCrest from './TrojanCrest';
+import TrojanHelmet from './home/TrojanHelmet';
+import { usePress } from './home/motion';
+import './home/home.css';
 
 interface HeroProps {
-  /** Same destination as the navbar's "Get Started" button. */
-  onGetStarted: () => void;
+  /** Opens My Materials (the app is only shown to signed-in users). */
+  onOpenMaterials: () => void;
   onExploreFeatures: () => void;
 }
 
-const HIGHLIGHTS = ['Brightspace courses', 'Solo or live challenges', 'Exam readiness', 'Adaptive plan', 'Study reports'];
+const HEADLINE = [['Learn', 'together.'], ['Reason', 'deeper.']];
+const INDEX = ['Course materials', 'Reasoning Arena', 'Exam preparation', 'Plans & reports'];
 
-const Hero: React.FC<HeroProps> = ({ onGetStarted, onExploreFeatures }) => (
-  <section className="tm-hero relative overflow-hidden" aria-labelledby="hero-title">
-    {/* Restrained depth: fine gold grid + soft cardinal wash */}
-    <div className="tm-hero-grid absolute inset-0" aria-hidden="true" />
-    <div className="tm-hero-wash absolute inset-0" aria-hidden="true" />
+/**
+ * One composed scene: the headline threads between the plume (behind) and the
+ * helmet (in front). Entrance is pure CSS; pointer depth only runs for a fine
+ * pointer when the visitor has not asked for reduced motion.
+ */
+const Hero: React.FC<HeroProps> = ({ onOpenMaterials, onExploreFeatures }) => {
+  const ref = useRef<HTMLElement>(null);
+  const reduce = useReducedMotion();
+  const press = usePress();
 
-    <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24 grid lg:grid-cols-[1.15fr_1fr] items-center gap-12 lg:gap-16">
-      <div className="text-center lg:text-left animate-slide-up">
-        <p className="inline-flex items-center gap-2 mb-6 text-xs font-bold uppercase tracking-[0.18em] text-gold">
-          <span className="h-px w-8 bg-gold/70" aria-hidden="true" />
-          TrojanMind
-        </p>
-        <h1 id="hero-title" className="text-4xl sm:text-5xl md:text-6xl font-extrabold leading-[1.05] tracking-tight text-[color:var(--tm-on-dark)] mb-6">
-          Learn together.
-          <br />
-          <span className="text-gold">Reason deeper.</span>
-        </h1>
-        <p className="text-lg md:text-xl leading-relaxed text-[color:var(--tm-on-dark-muted)] max-w-xl mx-auto lg:mx-0 mb-10">
-          Bring your course materials together, challenge your reasoning with peers, uncover learning gaps, and prepare
-          with a personalized study plan.
-        </p>
+  // Scroll-linked depth as the hero leaves: each layer drifts at its own rate.
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end start'] });
+  const range = reduce ? [0, 0] : undefined;
+  const plumeY = useTransform(scrollYProgress, [0, 1], range ?? [0, -70]);
+  const bodyY = useTransform(scrollYProgress, [0, 1], range ?? [0, 40]);
+  const discY = useTransform(scrollYProgress, [0, 1], range ?? [0, -110]);
+  const copyY = useTransform(scrollYProgress, [0, 1], range ?? [0, -30]);
 
-        <div className="flex flex-col sm:flex-row items-center gap-3 justify-center lg:justify-start">
-          <button type="button" onClick={onGetStarted} className="tm-btn-gold w-full sm:w-auto px-8 py-4 rounded-xl font-semibold text-base group">
-            Get Started
-            <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-          </button>
-          <button type="button" onClick={onExploreFeatures} className="tm-btn-ghost w-full sm:w-auto px-8 py-4 rounded-xl font-semibold text-base">
-            Explore Features
-            <ArrowDown size={18} aria-hidden="true" />
-          </button>
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !window.matchMedia) return;
+    const fine = window.matchMedia('(hover: hover) and (pointer: fine) and (min-width: 1024px)');
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (!fine.matches || reduce.matches) return;
+
+    let frame = 0;
+    let nx = 0;
+    let ny = 0;
+    const apply = () => {
+      frame = 0;
+      el.style.setProperty('--px', nx.toFixed(3));
+      el.style.setProperty('--py', ny.toFixed(3));
+    };
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      const r = el.getBoundingClientRect();
+      nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+      ny = ((e.clientY - r.top) / r.height) * 2 - 1;
+      if (!frame) frame = requestAnimationFrame(apply);
+    };
+    const onLeave = () => {
+      nx = 0;
+      ny = 0;
+      if (!frame) frame = requestAnimationFrame(apply);
+    };
+    el.addEventListener('pointermove', onMove, { passive: true });
+    el.addEventListener('pointerleave', onLeave);
+    return () => {
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerleave', onLeave);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return (
+    <section ref={ref} className="tmh tmh-hero" aria-labelledby="hero-title">
+      <div className="tmh-hero-inner">
+        <div className="tmh-disc-wrap" aria-hidden="true">
+          <motion.div style={{ y: discY }} className="tmh-fill">
+            <div className="tmh-disc" />
+          </motion.div>
         </div>
 
-        <ul className="mt-10 flex flex-wrap justify-center lg:justify-start gap-2" aria-label="What's inside">
-          {HIGHLIGHTS.map((h) => (
-            <li key={h} className="px-3 py-1.5 rounded-full border border-white/10 bg-white/[0.04] text-xs font-semibold text-[color:var(--tm-on-dark-muted)]">
-              {h}
+        <div className="tmh-helm-stack" aria-hidden="true">
+          <div className="tmh-helm-pos tmh-z-plume">
+            <motion.div style={{ y: plumeY }} className="tmh-fill">
+              <div className="tmh-helm-enter tmh-helm-enter--plume">
+                <TrojanHelmet layer="plume" className="tmh-helm-svg" />
+              </div>
+            </motion.div>
+          </div>
+          <div className="tmh-helm-pos tmh-z-body">
+            <motion.div style={{ y: bodyY }} className="tmh-fill">
+              <div className="tmh-helm-enter">
+                <TrojanHelmet layer="body" className="tmh-helm-svg" sweep />
+              </div>
+            </motion.div>
+          </div>
+        </div>
+
+        <h1 id="hero-title" className="tmh-h1">
+          {HEADLINE.map((words, li) => (
+            <span key={li} className={`tmh-line${li === 1 ? ' tmh-line--gold' : ''}`}>
+              {words.map((w, wi) => (
+                <React.Fragment key={w}>
+                  <span className="tmh-word" style={{ '--w': li * 2 + wi } as React.CSSProperties}>{w}</span>
+                  {wi < words.length - 1 ? ' ' : null}
+                </React.Fragment>
+              ))}
+            </span>
+          ))}
+        </h1>
+
+        <motion.div className="tmh-copy" style={{ y: copyY }}>
+          <p className="tmh-kicker tmh-kicker--on-ink">TrojanMind</p>
+          <p className="tmh-lede">
+            Bring your course materials together, challenge your reasoning with peers, uncover learning gaps, and prepare
+            with a personalized study plan.
+          </p>
+          <div className="tmh-cta-row">
+            <motion.button type="button" onClick={onOpenMaterials} className="tmh-btn tmh-btn--gold" {...press}>
+              My Materials
+              <ArrowRight size={18} aria-hidden="true" />
+            </motion.button>
+            <motion.button type="button" onClick={onExploreFeatures} className="tmh-btn tmh-btn--line" {...press}>
+              Explore Features
+              <ArrowDown size={18} aria-hidden="true" />
+            </motion.button>
+          </div>
+        </motion.div>
+
+        <ol className="tmh-index" aria-label="What's inside">
+          {INDEX.map((label, i) => (
+            <li key={label}>
+              <span aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
+              {label}
             </li>
           ))}
-        </ul>
+        </ol>
       </div>
-
-      <div className="relative mx-auto w-full max-w-[230px] sm:max-w-sm lg:max-w-md animate-fade-in anim-delay-2">
-        <div className="tm-float">
-          <TrojanCrest className="w-full h-auto drop-shadow-[0_24px_40px_rgba(0,0,0,0.45)]" />
-        </div>
-      </div>
-    </div>
-  </section>
-);
+    </section>
+  );
+};
 
 export default Hero;

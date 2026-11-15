@@ -611,6 +611,15 @@ export async function saveRevisionTask(
   return docRef.id;
 }
 
+/** Update fields the student edits on a planned task (e.g. its estimated duration). */
+export async function updateRevisionTask(
+  taskId: string,
+  updates: Partial<Pick<RevisionTask, "durationMinutes" | "date" | "studyFocus">>
+): Promise<void> {
+  assertFirebaseConfigured();
+  await updateDoc(doc(db, "users", getUserId(), "revisionTasks", taskId), updates);
+}
+
 export async function listRevisionTasks(): Promise<RevisionTask[]> {
   assertFirebaseConfigured();
   try {

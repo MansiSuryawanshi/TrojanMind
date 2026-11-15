@@ -16,17 +16,23 @@ import type { QuizAttempt } from '../types';
 import { getUserId, listUserDocuments, listAllSummaries, listMistakes } from '../services/firebaseService';
 import { generateReport } from '../services/claudeService';
 import { useStore } from '../store/store';
+import { deriveStudentAnalytics, isUnansweredResult, type TopicStat } from '../services/analyticsService';
+import { isAcademicTopicName } from '../services/contentClassification';
 
 // ── TYPES ───────────────────────────────────────────────────────────────────
 
 interface DashboardMetrics {
   totalQuizzes: number;
-  avgScore: number;
+  /** Plain average of recorded quiz scores (%). */
+  avgAccuracy: number;
   bestScore: number;
   worstScore: number;
-  avgAccuracy: number;
-  trend: number; // % change latest vs avg
-  topicPerformance: Record<string, { total: number; correct: number; accuracy: number }>;
+  /** Latest quiz minus the average, in points; null with fewer than 2 quizzes. */
+  trend: number | null;
+  isEarly: boolean;
+  academicTopics: TopicStat[];
+  policyTopics: TopicStat[];
+  totalUnanswered: number;
 }
 
 // ── COMPONENTS ──────────────────────────────────────────────────────────────
@@ -145,6 +151,9 @@ const QuizAttemptCard: React.FC<{ attempt: QuizAttempt }> = ({ attempt }) => {
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted font-medium">
                <span className="flex items-center gap-1"><Calendar size={12}/> {date}</span>
                <span className="flex items-center gap-1"><Award size={12}/> {attempt.score} pts</span>
+               {attempt.questionResults.some(isUnansweredResult) && (
+                 <span>{attempt.questionResults.filter(isUnansweredResult).length} unanswered</span>
+               )}
             </div>
           </div>
         </div>
@@ -168,21 +177,23 @@ const QuizAttemptCard: React.FC<{ attempt: QuizAttempt }> = ({ attempt }) => {
             className="border-t border-line bg-canvas"
           >
             <div className="p-4 sm:p-6 space-y-3">
-              {attempt.questionResults.map((res, i) => (
-                <div key={i} className={`p-4 rounded-xl bg-surface border border-line border-l-4 ${res.isCorrect ? 'border-l-success' : 'border-l-danger'}`}>
+              {attempt.questionResults.map((res, i) => {
+                const unanswered = isUnansweredResult(res);
+                return (
+                <div key={i} className={`p-4 rounded-xl bg-surface border border-line border-l-4 ${res.isCorrect ? 'border-l-success' : unanswered ? 'border-l-line-strong' : 'border-l-danger'}`}>
                   <div className="flex justify-between items-start gap-4 mb-2">
                     <div className="flex flex-col gap-1">
                       <span className="text-[10px] font-bold uppercase text-cardinal tracking-wider">{res.type === 'mcq' ? 'Multiple Choice' : 'Reasoning'}</span>
                       <p className="font-bold text-sm text-ink leading-tight">{res.questionText}</p>
                     </div>
-                    <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${res.isCorrect ? 'bg-success-soft text-success border-success/25' : 'bg-danger-soft text-danger border-danger/25'}`}>
-                      {res.isCorrect ? 'Correct' : 'Wrong'}
+                    <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${res.isCorrect ? 'bg-success-soft text-success border-success/25' : unanswered ? 'bg-sunken text-muted border-line' : 'bg-danger-soft text-danger border-danger/25'}`}>
+                      {res.isCorrect ? 'Correct' : unanswered ? 'Unanswered' : 'Incorrect'}
                     </span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs mb-3">
                     <div>
                       <p className="text-muted uppercase mb-1">Your Answer</p>
-                      <p className={res.isCorrect ? 'text-success' : 'text-danger'}>{res.userAnswer || 'No answer'}</p>
+                      <p className={res.isCorrect ? 'text-success' : unanswered ? 'text-muted' : 'text-danger'}>{unanswered ? 'No answer (time ran out)' : res.userAnswer}</p>
                     </div>
                     {!res.isCorrect && (
                       <div>
@@ -197,7 +208,8 @@ const QuizAttemptCard: React.FC<{ attempt: QuizAttempt }> = ({ attempt }) => {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </motion.div>
         )}
@@ -242,7 +254,7 @@ export const StudyReport: React.FC = () => {
         const missed = [
           ...new Set(
             mistakes
-              .filter((m) => m.conceptMisunderstood)
+              .filter((m) => isAcademicTopicName(m.conceptMisunderstood))
               .map((m) => m.conceptMisunderstood as string)
           ),
         ].slice(0, 8);
@@ -265,33 +277,19 @@ export const StudyReport: React.FC = () => {
 
   const metrics = useMemo((): DashboardMetrics | null => {
     if (attempts.length === 0) return null;
-
-    const total = attempts.length;
-    const avgScore = Math.round(attempts.reduce((sum, a) => sum + a.score, 0) / total);
-    const avgAccuracy = Math.round(attempts.reduce((sum, a) => sum + a.accuracy, 0) / total);
-    const best = Math.max(...attempts.map(a => a.score));
-    const worst = Math.min(...attempts.map(a => a.score));
-    
-    // Trend: latest quiz vs avg accuracy
-    const latest = attempts[0].accuracy;
-    const trend = latest - avgAccuracy;
-
-    // Topic Performance
-    const topicPerf: Record<string, { total: number; correct: number; accuracy: number }> = {};
-    attempts.forEach(attempt => {
-      attempt.questionResults.forEach(res => {
-        const t = res.topic || 'General';
-        if (!topicPerf[t]) topicPerf[t] = { total: 0, correct: 0, accuracy: 0 };
-        topicPerf[t].total++;
-        if (res.isCorrect) topicPerf[t].correct++;
-      });
-    });
-
-    Object.keys(topicPerf).forEach(t => {
-      topicPerf[t].accuracy = Math.round((topicPerf[t].correct / topicPerf[t].total) * 100);
-    });
-
-    return { totalQuizzes: total, avgScore, bestScore: best, worstScore: worst, avgAccuracy, trend, topicPerformance: topicPerf };
+    const analytics = deriveStudentAnalytics(attempts);
+    const accuracies = attempts.map((a) => Number(a.accuracy) || 0);
+    return {
+      totalQuizzes: attempts.length,
+      avgAccuracy: analytics.avgQuizScore,
+      bestScore: Math.max(...accuracies),
+      worstScore: Math.min(...accuracies),
+      trend: attempts.length >= 2 ? accuracies[0] - analytics.avgQuizScore : null,
+      isEarly: analytics.isEarlyResult,
+      academicTopics: analytics.topicStats.filter((t) => !t.isCoursePolicy && !t.isGeneric),
+      policyTopics: analytics.topicStats.filter((t) => t.isCoursePolicy),
+      totalUnanswered: analytics.totalUnanswered,
+    };
   }, [attempts]);
 
   const handleGenerateAiInsights = async () => {
@@ -299,7 +297,7 @@ export const StudyReport: React.FC = () => {
     setIsGeneratingAi(true);
     try {
       const snapshot = {
-        quizSessions: attempts.map(a => ({ scoreA: a.accuracy, conceptGaps: a.weakTopics, misconceptions: [], depthInsight: '' })),
+        quizSessions: attempts.map(a => ({ scoreA: a.accuracy, conceptGaps: (a.weakTopics || []).filter(isAcademicTopicName), misconceptions: [], depthInsight: '' })),
         scheduleAdherence: { sessionsPlanned: 0, sessionsCompleted: 0, priorityGap: '' },
         examReadiness: { overallScore: metrics.avgAccuracy, topicCoverage: [], weakAreas: [], crossExamsPassed: 0, crossExamsFailed: 0 }
       };
@@ -412,29 +410,43 @@ export const StudyReport: React.FC = () => {
         )}
       </div>
 
+      {metrics?.isEarly && (
+        <div className="mb-6 rounded-xl border border-info/25 bg-info-soft px-4 py-3 text-sm text-ink" role="status">
+          <span className="font-semibold">Early practice results.</span> These numbers come from {metrics.totalQuizzes} quiz{metrics.totalQuizzes === 1 ? '' : 'zes'}.
+          Take a few more to see a reliable trend. Quiz scores show practice results, not overall understanding.
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 mb-10">
         <div className="surface p-5 rounded-xl border-t-[3px] border-t-cardinal">
-           <span className="text-[11px] font-semibold text-muted uppercase tracking-wider block mb-3">Total Quizzes</span>
+           <span className="text-[11px] font-semibold text-muted uppercase tracking-wider block mb-3">Quizzes taken</span>
            <div className="text-3xl md:text-4xl font-extrabold text-ink">{metrics?.totalQuizzes}</div>
         </div>
         <div className="surface p-5 rounded-xl">
-           <span className="text-[11px] font-semibold text-muted uppercase tracking-wider block mb-3">Avg Accuracy</span>
+           <span className="text-[11px] font-semibold text-muted uppercase tracking-wider block mb-3">Average quiz score</span>
            <div className="text-3xl md:text-4xl font-extrabold text-ink">{metrics?.avgAccuracy}%</div>
         </div>
         <div className="surface p-5 rounded-xl">
-           <span className="text-[11px] font-semibold text-muted uppercase tracking-wider block mb-3">Improvement</span>
-           <div className={`text-3xl md:text-4xl font-extrabold flex items-center gap-1 ${metrics && metrics.trend >= 0 ? 'text-success' : 'text-danger'}`}>
-              {metrics && metrics.trend >= 0 ? <TrendingUp size={28}/> : <TrendingDown size={28}/>}
-              {Math.abs(metrics?.trend || 0)}%
-           </div>
+           <span className="text-[11px] font-semibold text-muted uppercase tracking-wider block mb-3">Latest vs. average</span>
+           {metrics && metrics.trend !== null ? (
+             <div className={`text-3xl md:text-4xl font-extrabold flex items-center gap-1 ${metrics.trend >= 0 ? 'text-success' : 'text-danger'}`}>
+                {metrics.trend >= 0 ? <TrendingUp size={28}/> : <TrendingDown size={28}/>}
+                {metrics.trend >= 0 ? '+' : '−'}{Math.abs(metrics.trend)}
+             </div>
+           ) : (
+             <div>
+               <div className="text-3xl md:text-4xl font-extrabold text-muted">—</div>
+               <div className="text-[10px] text-muted mt-1">Needs 2+ quizzes</div>
+             </div>
+           )}
         </div>
         <div className="surface p-5 rounded-xl">
-           <span className="text-[11px] font-semibold text-muted uppercase tracking-wider block mb-3">Best Score</span>
-           <div className="text-3xl md:text-4xl font-extrabold text-ink">{metrics?.bestScore}</div>
+           <span className="text-[11px] font-semibold text-muted uppercase tracking-wider block mb-3">Best quiz</span>
+           <div className="text-3xl md:text-4xl font-extrabold text-ink">{metrics?.bestScore}%</div>
         </div>
         <div className="surface p-5 rounded-xl">
-           <span className="text-[11px] font-semibold text-muted uppercase tracking-wider block mb-3">Worst Score</span>
-           <div className="text-3xl md:text-4xl font-extrabold text-muted">{metrics?.worstScore}</div>
+           <span className="text-[11px] font-semibold text-muted uppercase tracking-wider block mb-3">Lowest quiz</span>
+           <div className="text-3xl md:text-4xl font-extrabold text-muted">{metrics?.worstScore}%</div>
         </div>
       </div>
 
@@ -447,27 +459,50 @@ export const StudyReport: React.FC = () => {
         </div>
 
         <div className="surface rounded-2xl p-5 md:p-8">
-           <h3 className="text-sm font-bold text-ink uppercase tracking-wider mb-6 flex items-center gap-2">
-              <Target size={18} className="text-gold-ink"/> Topic Mastery
+           <h3 className="text-sm font-bold text-ink uppercase tracking-wider mb-2 flex items-center gap-2">
+              <Target size={18} className="text-gold-ink"/> Results by topic
            </h3>
+           <p className="text-[11px] text-muted mb-5">Correct out of answered questions. Unanswered questions are listed separately.</p>
            <div className="space-y-5">
-              {Object.entries(metrics?.topicPerformance || {}).slice(0, 5).map(([topic, data]) => (
-                <div key={topic}>
-                   <div className="flex justify-between text-sm font-semibold text-ink mb-2">
-                      <span className="truncate pr-4">{topic}</span>
-                      <span>{data.accuracy}%</span>
+              {(metrics?.academicTopics || []).slice(0, 6).map((t) => (
+                <div key={t.name}>
+                   <div className="flex justify-between gap-3 text-sm font-semibold text-ink mb-1">
+                      <span className="truncate">{t.name}</span>
+                      <span className="shrink-0">{t.accuracy === null ? 'Not assessed' : `${t.correct}/${t.answered}`}</span>
                    </div>
-                   <div className="w-full h-2 bg-sunken rounded-full overflow-hidden">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${data.accuracy}%` }}
-                        transition={{ duration: 1, ease: "easeOut" }}
-                        className={`h-full rounded-full ${data.accuracy >= 70 ? 'bg-success' : 'bg-warning'}`} 
-                      />
-                   </div>
+                   {t.accuracy !== null && (
+                     <div className="w-full h-2 bg-sunken rounded-full overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${t.accuracy}%` }}
+                          transition={{ duration: 1, ease: "easeOut" }}
+                          className={`h-full rounded-full ${t.accuracy >= 70 ? 'bg-success' : 'bg-warning'}`}
+                        />
+                     </div>
+                   )}
+                   {t.unanswered > 0 && (
+                     <p className="text-[11px] text-muted mt-1">{t.unanswered} unanswered</p>
+                   )}
                 </div>
               ))}
+              {(metrics?.academicTopics.length ?? 0) === 0 && (
+                <p className="text-sm text-muted">No course topics assessed yet.</p>
+              )}
            </div>
+           {(metrics?.policyTopics.length ?? 0) > 0 && (
+             <div className="mt-6 pt-4 border-t border-line">
+               <p className="text-[11px] font-semibold text-muted uppercase tracking-wider mb-2">Course policy quizzes</p>
+               <ul className="space-y-1 text-xs text-muted">
+                 {metrics!.policyTopics.slice(0, 4).map((t) => (
+                   <li key={t.name} className="flex justify-between gap-3">
+                     <span className="truncate">{t.name.replace(/^Course policies\s*·\s*/i, '')}</span>
+                     <span className="shrink-0">{t.accuracy === null ? 'Not assessed' : `${t.correct}/${t.answered}`}</span>
+                   </li>
+                 ))}
+               </ul>
+               <p className="text-[10px] text-muted mt-2">Not used for study recommendations.</p>
+             </div>
+           )}
         </div>
       </div>
 

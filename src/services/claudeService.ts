@@ -8,6 +8,15 @@ import type { StudySnapshot, GeneratedReport } from '../types/report';
 
 import { AI_ENDPOINT as CLAUDE_URL, aiFetch } from './aiClient';
 import { ANTHROPIC_MODEL } from '../config/aiConfig';
+import { isAdministrativeLabel } from './contentClassification';
+
+/** Per-topic quiz evidence passed to the schedule generator. */
+export interface TopicAccuracyInput {
+  topic: string;
+  accuracy: number;
+  /** e.g. "1 of 4 answered questions correct (latest quiz: Nov 14)". */
+  evidence?: string;
+}
 
 
 // The API key lives only on the backend; aiFetch adds the user's ID token.
@@ -272,7 +281,10 @@ function normalizeScheduleSessions(
         ...day,
         date,
         day: dayLabel,
-        sessions: (day.sessions || []).map((s) => {
+        // Course policies are never academic study sessions.
+        sessions: (day.sessions || [])
+          .filter((s) => !isAdministrativeLabel(s.targets_gap) && !isAdministrativeLabel(s.label))
+          .map((s) => {
           const topic = s.targets_gap || s.topic_tag || priority;
           const resources = Array.isArray(s.resources) ? [...s.resources] : [];
           const hasArticle = resources.some((r) => r.type === 'article' || /http/i.test(r.url || ''));
@@ -305,7 +317,7 @@ function normalizeScheduleSessions(
             ...s,
             what_to_study:
               s.what_to_study?.trim() ||
-              `Master the core ideas, definitions, and common pitfalls for "${topic}".`,
+              `Re-read the part of your notes on "${topic}", then explain it without looking and check what you missed.`,
             study_steps:
               s.study_steps && s.study_steps.length
                 ? s.study_steps
@@ -328,15 +340,16 @@ export const generateSchedule = async (
   gaps: string[],
   avgScore: number,
   daysToExam: number = 7,
-  topicAccuracy?: { topic: string; accuracy: number }[],
+  topicAccuracy?: TopicAccuracyInput[],
   uploadedMaterials: string[] = [],
+  attemptCount = 0,
 ): Promise<ScheduleResponse> => {
 
   // Build per-topic accuracy context so Claude allocates more time to weak topics
   const topicContext = topicAccuracy && topicAccuracy.length > 0
-    ? `\nPer-topic quiz accuracy (lower = needs more study time):\n${topicAccuracy
+    ? `\nPer-topic quiz results (academic topics only, weakest first):\n${topicAccuracy
         .sort((a, b) => a.accuracy - b.accuracy)
-        .map(t => `  - ${t.topic}: ${t.accuracy}% correct`)
+        .map(t => `  - ${t.topic}: ${t.evidence || `${t.accuracy}% of answered questions correct`}`)
         .join('\n')}`
     : '';
 
@@ -349,9 +362,9 @@ export const generateSchedule = async (
 
   const prompt = `You are an adaptive learning coach for college students.
 
-The student has these concept gaps identified from real historical quiz sessions:
-Gaps (sorted weakest first): ${JSON.stringify(gaps)}
-Average understanding score: ${avgScore}/100
+The student missed questions on these academic topics in their quizzes:
+Topics to review (weakest first): ${JSON.stringify(gaps)}
+Average quiz score: ${avgScore}% across ${attemptCount} quiz${attemptCount === 1 ? '' : 'zes'}${attemptCount < 3 ? ' (early results: too few quizzes to call it a trend; do not describe the student as weak or strong overall)' : ''}
 Days until exam: ${daysToExam}${topicContext}${materialsContext}
 
 PLANNING WINDOW (HARD RULE):
@@ -361,15 +374,17 @@ PLANNING WINDOW (HARD RULE):
 ADAPTIVE STRATEGY BASED ON DAYS LEFT (${daysToExam}):
 - 0-3 days (URGENT): "Sprint Mode". Focus ONLY on the most critical weak areas. Shorter, high-intensity sessions. Rationale should mention "Critical window".
 - 4-10 days (TIGHT): "Gap Closure Mode". Heavy focus on weak areas, but include 1-2 review sessions for strong topics.
-- 11+ days (BALANCED): "Mastery Mode". Evenly spread sessions, deep dives into complex topics, and spaced repetition.
+- 11+ days (BALANCED): "Spaced review". Evenly spread sessions, deep dives into complex topics, and spaced repetition.
 
 IMPORTANT RULES:
-- Topics with lower accuracy MUST get more sessions and longer durations (e.g. 60 min instead of 30 min)
-- The weakest topic should appear in every day's schedule
+- Plan ONLY the academic topics listed above. Never create sessions about course administration (deadlines, grading, attendance, submission or communication policies).
+- Topics with lower accuracy get more sessions. "duration" is a rough estimate the student will edit: default to "30 min", and never justify or explain the duration.
+- A quiz score is practice evidence, not a measure of overall understanding or mastery. Don't call topics "mastered".
 - Use badge_type "coral" for gap topics, "purple" for challenge/practice, "teal" for review
 - For EACH session provide:
-  - rationale: why this session is scheduled
-  - what_to_study: 1–3 sentences of CONCRETE content (concepts, definitions, procedures, formulas) — not vague advice
+  - label: name the concept being studied (e.g. "Review: Binary search trees")
+  - rationale: why it is recommended, citing the quiz evidence above (e.g. "You got 1 of 4 questions on this right in your Nov 14 quiz")
+  - what_to_study: 1–3 sentences naming a CONCRETE activity using the uploaded materials (re-read a section, redo missed questions, rework an example) — not vague advice
   - study_steps: 3–5 ordered actionable steps for the session
   - resources: 2–4 study sources. MUST include at least one online article (type "article") with a real https URL (prefer well-known educational sites, .edu pages, official docs, or a Google/Scholar search URL for the topic). Also include uploaded_material when filenames are provided. Types: article | video | docs | uploaded_material | practice | other.
 - Never invent fake journal DOIs. Prefer real sites (MDN, Khan Academy, official docs, university pages) OR search URLs.
@@ -469,6 +484,12 @@ Weak areas: ${snapshot.examReadiness.weakAreas.join(', ') || 'None identified'}
 Cross-examinations passed: ${snapshot.examReadiness.crossExamsPassed}
 Cross-examinations failed: ${snapshot.examReadiness.crossExamsFailed}
 
+Interpretation rules:
+- A quiz score is practice evidence, not a measure of overall understanding or mastery.
+- With fewer than 3 quiz sessions, describe results as early practice results and say more practice is needed to see a reliable trend.
+- Base every finding on the data above. Don't invent misconceptions, reasoning depth, or topics that aren't listed.
+- Ignore course-administration topics (deadlines, grading, attendance policies) when discussing what to study.
+
 Return this exact JSON structure:
 {
   "overallScore": 62,
@@ -518,9 +539,13 @@ function buildMockSchedule(
   gaps: string[],
   _avgScore: number,
   daysToExam: number,
-  topicAccuracy?: { topic: string; accuracy: number }[],
+  topicAccuracy?: TopicAccuracyInput[],
   uploadedMaterials: string[] = []
 ): ScheduleResponse {
+  const evidenceFor = (topic: string) => {
+    const hit = topicAccuracy?.find((t) => t.topic === topic);
+    return hit?.evidence ? `From your quizzes: ${hit.evidence}.` : `You missed questions on “${topic}” in a recent quiz.`;
+  };
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const todayDate = new Date();
   // Inclusive window: today through exam day. Cap display days at 5.
@@ -611,12 +636,12 @@ function buildMockSchedule(
     sessions: [
       {
         time: '9:00 am',
-        label: `Critical Gap: ${priorityGap}`,
+        label: `Review: ${priorityGap}`,
         topic_tag: 'Gap Focus',
-        duration: daysToExam <= 2 ? '75 min' : '60 min',
+        duration: '30 min',
         badge_type: 'coral',
         targets_gap: priorityGap,
-        rationale: 'Highest priority gap identified from recent quiz performance.',
+        rationale: evidenceFor(priorityGap),
         ...detailFor(priorityGap),
       },
       ...(windowDays === 1
@@ -625,7 +650,7 @@ function buildMockSchedule(
               time: '2:00 pm',
               label: 'Exam-day rapid review',
               topic_tag: 'Sprint',
-              duration: '40 min',
+              duration: '30 min',
               badge_type: 'purple' as const,
               targets_gap: second,
               rationale: 'Only one day left — compress secondary gaps into a short block.',
@@ -667,22 +692,22 @@ function buildMockSchedule(
       sessions: [
         {
           time: '10:00 am',
-          label: `Targeted Study: ${second}`,
+          label: `Review: ${second}`,
           topic_tag: 'Weak Topic',
-          duration: '45 min',
+          duration: '30 min',
           badge_type: 'coral',
           targets_gap: second,
-          rationale: 'Addressing secondary concept gaps to build foundational strength.',
+          rationale: evidenceFor(second),
           ...detailFor(second),
         },
         {
           time: '4:00 pm',
           label: windowDays === 2 ? 'Pre-exam simulation' : 'Exam Prep Simulation',
           topic_tag: 'Mock Exam',
-          duration: '40 min',
+          duration: '30 min',
           badge_type: 'purple',
           targets_gap: null,
-          rationale: 'Timed simulation to build exam-day stamina — still before the exam.',
+          rationale: 'A timed practice run on the topics you missed, before the exam.',
           what_to_study: `Timed practice covering ${priorityGap} and ${second}; review wrong answers with a source article.`,
           study_steps: [
             'Run a short timed quiz without notes.',
@@ -709,12 +734,12 @@ function buildMockSchedule(
       sessions: [
         {
           time: '9:30 am',
-          label: `Mastery Review: ${priorityGap}`,
+          label: `Revisit: ${priorityGap}`,
           topic_tag: 'Spaced Repetition',
-          duration: '45 min',
+          duration: '30 min',
           badge_type: 'teal',
           targets_gap: priorityGap,
-          rationale: 'Revisiting weakest area before the exam deadline.',
+          rationale: `A second pass a couple of days later helps it stick. ${evidenceFor(priorityGap)}`,
           ...detailFor(priorityGap),
         },
       ],
@@ -730,12 +755,12 @@ function buildMockSchedule(
       sessions: [
         {
           time: '10:00 am',
-          label: `Continue: ${topic}`,
+          label: `Review: ${topic}`,
           topic_tag: 'Within exam window',
-          duration: '45 min',
+          duration: '30 min',
           badge_type: offset === windowDays - 1 ? 'teal' : 'coral',
           targets_gap: topic,
-          rationale: 'Kept inside the exam date window — no sessions after the exam.',
+          rationale: evidenceFor(topic),
           ...detailFor(topic),
         },
       ],
@@ -747,30 +772,34 @@ function buildMockSchedule(
     priority_gap: priorityGap,
     readiness_message:
       daysToExam < 4
-        ? `SPRINT MODE: Plan covers the next ${windowDays} day(s) only — ending on/before exam.`
-        : `GAP CLOSURE: ${windowDays}-day plan ending on/before your exam (no post-exam sessions).`,
+        ? `A ${windowDays}-day plan that ends on or before your exam. Adjust the time estimates to fit your day.`
+        : `A ${windowDays}-day plan that ends on or before your exam. Adjust the time estimates to fit your day.`,
     schedule,
   };
 }
 
 function buildMockReport(snapshot: StudySnapshot): GeneratedReport {
-  const gaps = snapshot.quizSessions.flatMap((q) => q.conceptGaps);
+  const sessions = snapshot.quizSessions.length;
+  const avg = sessions ? Math.round(snapshot.quizSessions.reduce((s, q) => s + q.scoreA, 0) / sessions) : 0;
+  const gaps = [...new Set(snapshot.quizSessions.flatMap((q) => q.conceptGaps))].filter((g) => !isAdministrativeLabel(g));
+  const early = sessions < 3;
+  const scoreLine = `Average quiz score: ${avg}% across ${sessions} quiz${sessions === 1 ? '' : 'zes'}.`;
+  const trendLine = early
+    ? 'These are early practice results; take a few more quizzes to see a reliable trend.'
+    : 'Compare recent quizzes with earlier ones to see which topics are improving.';
   return {
-    overallScore: 62,
-    topStrength: 'Shows consistent effort in completing study sessions and engaging with challenging material.',
-    topWeakness: `Needs to close the gap on "${gaps[0] ?? 'core concepts'}" before the exam.`,
+    overallScore: avg,
+    topStrength: early ? 'Too early to name a strength from quiz data.' : 'See the per-topic results for topics you answer correctly.',
+    topWeakness: gaps.length ? `Questions on “${gaps[0]}” were missed most recently.` : 'No missed academic topics recorded yet.',
     sections: [
-      { title: 'Reasoning Quality', score: 58, summary: 'Foundational understanding present but deep causal reasoning is lacking. Surface-level answers are frequent.', keyFindings: [`${gaps.length} concept gap(s) detected`, 'Depth scores suggest shallow explanations', 'Misconception patterns indicate gaps'], recommendation: `Practice explaining "${gaps[0] ?? 'key concepts'}" without notes.` },
-      { title: 'Study Consistency', score: 65, summary: 'Schedule adherence is moderate. Consistent daily review will compound before the exam.', keyFindings: [`${snapshot.scheduleAdherence.sessionsPlanned} sessions planned`, `${snapshot.scheduleAdherence.sessionsCompleted} completed`, `Priority gap: "${snapshot.scheduleAdherence.priorityGap}"`], recommendation: 'Block 30 minutes each morning for the priority gap.' },
-      { title: 'Exam Readiness', score: 55, summary: 'Overall readiness is below target. Weak areas need focused attention in remaining time.', keyFindings: ['Readiness below 75% threshold', `${snapshot.examReadiness.weakAreas.length} weak area(s) identified`, 'Topic coverage needs improvement'], recommendation: 'Run one cross-examination per day on the weakest topic.' },
-      { title: 'Concept Mastery', score: 60, summary: 'Concepts understood at surface level but application depth is insufficient for exam questions.', keyFindings: [`"${gaps[0] ?? 'Core concepts'}" requires deeper understanding`, `"${gaps[1] ?? 'Secondary topics'}" shows partial mastery`], recommendation: `Create a concept map connecting "${gaps[0] ?? 'key ideas'}" to real-world examples.` },
+      { title: 'Quiz results', score: avg, summary: `${scoreLine} ${trendLine}`, keyFindings: [scoreLine], recommendation: 'Take another quiz on the same material to confirm these results.' },
+      { title: 'Topics to review', score: avg, summary: gaps.length ? `Missed questions came from: ${gaps.slice(0, 5).join(', ')}.` : 'No academic topics with missed questions yet.', keyFindings: gaps.slice(0, 3), recommendation: gaps.length ? `Re-read your notes on “${gaps[0]}” and redo the questions you missed.` : 'Keep practicing with lecture material.' },
+      { title: 'Study schedule', score: 0, summary: `${snapshot.scheduleAdherence.sessionsPlanned} session(s) planned.`, keyFindings: [], recommendation: 'Adjust the planned sessions to the time you actually have.' },
     ],
-    actionPlan: [
-      `Immediate action (next 24 hours): Re-read notes on "${gaps[0] ?? 'the priority gap'}" and write a 3-sentence explanation from memory`,
-      'This week: Complete all planned sessions and run 2 cross-examinations on weak areas',
-      'Before exam: Do a full timed mock exam and review every question scored below 70',
-    ],
-    predictedExamScore: 64,
+    actionPlan: gaps.length
+      ? [`Next: review “${gaps[0]}” using your uploaded notes`, 'Then: retake a short quiz on that material', 'Before the exam: revisit any topic you missed twice']
+      : ['Next: take a quiz on your lecture material', 'Then: review any questions you miss', 'Before the exam: revisit missed topics'],
+    predictedExamScore: avg,
     confidenceCalibration: 'well-calibrated',
   };
 }

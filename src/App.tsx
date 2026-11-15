@@ -145,8 +145,8 @@ const App: React.FC = () => {
         {activeTab === HOME_TABS.home && (
           <div className="animate-fade-in">
             <AssignmentPopup />
-            {/* "Get Started" mirrors the navbar's Get Started (My Courses). */}
-            <Hero onGetStarted={() => navigateFromHome(HOME_TABS.courses)} onExploreFeatures={exploreFeatures} />
+            {/* Signed-in users go straight back to their saved materials. */}
+            <Hero onOpenMaterials={() => navigateFromHome(HOME_TABS.materials)} onExploreFeatures={exploreFeatures} />
             <Features onNavigate={navigateFromHome} />
             <HowItWorks />
             <FinalCTA
@@ -198,7 +198,10 @@ const App: React.FC = () => {
           </div>
         )}
         {activeTab === HOME_TABS.schedule && (
-          <StudySchedule onSwitchToChallenge={() => setActiveTab(HOME_TABS.challenge)} />
+          <StudySchedule
+            onSwitchToChallenge={() => setActiveTab(HOME_TABS.challenge)}
+            onAddMaterial={() => navigateFromHome(HOME_TABS.upload)}
+          />
         )}
         {activeTab === HOME_TABS.report && <StudyReport />}
         {activeTab === HOME_TABS.courses && <MyCourses onUpload={() => navigateFromHome(HOME_TABS.upload)} onOpenWorkspace={openWorkspace} />}

@@ -41,6 +41,7 @@ export type {
   MistakeEntry,
   RevisionTask,
   SummaryProgress,
+  CourseInfoItem,
 } from './summary';
 
 export interface StudentScore {
@@ -146,6 +147,8 @@ export interface QuizAttempt {
     explanation?: string | null;
     feedback?: string | null;
     topic?: string | null;
+    /** True when no answer was given (e.g. the timer ran out). Older attempts infer this from userAnswer. */
+    unanswered?: boolean;
   }[];
   weakTopics: string[];
   strongTopics: string[];
@@ -182,7 +185,18 @@ export interface CrossExamRecord {
 
 export interface TopicProgress {
   name: string;
-  percentage: number;
+  /** Share of answered questions that were correct; null when nothing was answered (not assessed). */
+  percentage: number | null;
+  /** Questions on this topic across all attempts. */
+  total?: number;
+  answered?: number;
+  correct?: number;
+  unanswered?: number;
+  /** Most recent attempt that included this topic, for "why" references. */
+  lastAttemptId?: string | null;
+  lastAttemptLabel?: string | null;
+  lastAttemptCorrect?: number;
+  lastAttemptAnswered?: number;
 }
 
 export interface QuizAnswer {

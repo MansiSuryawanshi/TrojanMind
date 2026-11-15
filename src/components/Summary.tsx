@@ -17,6 +17,8 @@ import {
   Shuffle,
   Sparkles,
   CalendarPlus,
+  ClipboardList,
+  Info,
 } from 'lucide-react';
 import type { StudyDocument } from '../types';
 import type {
@@ -28,6 +30,7 @@ import type {
   Flashcard,
   ChatMessage,
   FlashcardDeck,
+  CourseInfoItem,
 } from '../types/summary';
 import {
   listUserDocuments,
@@ -54,6 +57,12 @@ import {
 } from '../services/summaryService';
 import { useStore } from '../store/store';
 import {
+  ADMIN_ONLY_MESSAGE,
+  buildSummaryView,
+  isAdministrativeLabel,
+  isAdministrativeOnlyError,
+} from '../services/contentClassification';
+import {
   suggestSchedulePlacement,
   type ScheduleSuggestion,
 } from '../services/scheduleSuggest';
@@ -69,10 +78,10 @@ type InnerTab =
   | 'original';
 
 const MODE_OPTIONS: { id: SummaryMode; label: string; hint: string }[] = [
-  { id: 'detailed', label: 'Detailed Summary', hint: 'Full concept coverage with source pages' },
-  { id: 'quick', label: 'Quick Summary', hint: 'Short overview and takeaways' },
-  { id: 'exam_revision', label: 'Exam Revision Summary', hint: 'High-value formulas and exam focus' },
-  { id: 'explain_simply', label: 'Explain Simply', hint: 'Beginner-friendly explanations' },
+  { id: 'detailed', label: 'Detailed Summary', hint: 'Every concept explained, with source pages' },
+  { id: 'quick', label: 'Quick Summary', hint: 'A short overview and the main takeaways' },
+  { id: 'exam_revision', label: 'Exam Revision Summary', hint: 'Definitions, formulas and likely exam focus' },
+  { id: 'explain_simply', label: 'Explain Simply', hint: 'Plain-language explanations' },
 ];
 
 interface SummaryProps {
@@ -145,6 +154,11 @@ export const Summary: React.FC<SummaryProps> = ({
     () => (selected ? parsePagedText(selected.rawText || '') : []),
     [selected]
   );
+
+  // Academic content vs course information; also applied to older saved summaries.
+  const view = useMemo(() => (activeSummary ? buildSummaryView(activeSummary) : null), [activeSummary]);
+  const adminOnly = view?.kind === 'administrative';
+  const [flashNotice, setFlashNotice] = useState<string | null>(null);
 
   const loadDocuments = useCallback(async () => {
     setLoadingDocs(true);
@@ -318,7 +332,7 @@ export const Summary: React.FC<SummaryProps> = ({
       const cards = await extractConceptsFromSummary(activeSummary, selected);
       setConcepts(cards);
       if (!cards.length) {
-        setError('No concepts could be extracted from this summary yet.');
+        setError('This summary doesn’t explain any course concepts yet, so there’s nothing to list here.');
       }
     } catch (e: any) {
       setError(e?.message || 'Concept extraction failed');
@@ -328,10 +342,10 @@ export const Summary: React.FC<SummaryProps> = ({
   };
 
   useEffect(() => {
-    if (innerTab === 'concepts' && activeSummary && concepts.length === 0 && !conceptsLoading) {
+    if (innerTab === 'concepts' && activeSummary && !adminOnly && concepts.length === 0 && !conceptsLoading) {
       void loadConcepts();
     }
-  }, [innerTab, activeSummary]);
+  }, [innerTab, activeSummary, adminOnly]);
 
   const sendChat = async (text?: string) => {
     const q = (text ?? chatInput).trim();
@@ -388,6 +402,7 @@ export const Summary: React.FC<SummaryProps> = ({
   const makeFlashcards = async () => {
     if (!selected) return;
     setFlashLoading(true);
+    setFlashNotice(null);
     try {
       const cards = await generateFlashcardsFromMaterial(selected, activeSummary, 12);
       const deckId = await saveFlashcardDeck({
@@ -401,7 +416,8 @@ export const Summary: React.FC<SummaryProps> = ({
       setInnerTab('flashcards');
       setSummaryBridge({ flashcardsReviewedCount: cards.length });
     } catch (e: any) {
-      setError(e?.message || 'Flashcard generation failed');
+      if (isAdministrativeOnlyError(e)) setFlashNotice(ADMIN_ONLY_MESSAGE);
+      else setError(e?.message || 'Flashcard generation failed');
     } finally {
       setFlashLoading(false);
     }
@@ -423,6 +439,8 @@ export const Summary: React.FC<SummaryProps> = ({
   };
 
   const openScheduleModal = (topic: string) => {
+    // Course policies stay in Course information; they aren't study sessions.
+    if (isAdministrativeLabel(topic)) return;
     const suggestion = suggestSchedulePlacement({
       topic,
       summary: activeSummary,
@@ -430,6 +448,7 @@ export const Summary: React.FC<SummaryProps> = ({
       revisionTasks,
       daysLeft,
       examDate,
+      fileName: selected?.fileName,
     });
     setScheduleTopic(topic);
     setScheduleSuggestion(suggestion);
@@ -473,7 +492,7 @@ export const Summary: React.FC<SummaryProps> = ({
     const id = await saveRevisionTask(task);
     addRevisionTaskLocal({ ...task, id, createdAt: null });
     closeScheduleModal();
-    setSaveMsg('Added to Study Schedule with coach plan');
+    setSaveMsg('Added to your Study Schedule');
     setTimeout(() => setSaveMsg(null), 2000);
     onGoToSchedule();
   };
@@ -496,7 +515,7 @@ export const Summary: React.FC<SummaryProps> = ({
     { id: 'ask', label: 'Ask AI' },
     { id: 'flashcards', label: 'Flashcards' },
     { id: 'exam_notes', label: 'Exam Notes' },
-    { id: 'original', label: 'Original PDF' },
+    { id: 'original', label: 'Original Text' },
   ];
 
   if (loadingDocs) {
@@ -514,7 +533,8 @@ export const Summary: React.FC<SummaryProps> = ({
           AI <span className="text-cardinal">Summary</span>
         </h1>
         <p className="text-muted font-medium">
-          Summarize, explore, and ask questions about materials you already uploaded.
+          Choose a material to see what it teaches, then practice its key concepts. Deadlines, grading and other course
+          rules are listed separately.
         </p>
       </div>
 
@@ -523,13 +543,13 @@ export const Summary: React.FC<SummaryProps> = ({
         <div className="flex flex-col md:flex-row md:items-end gap-4">
           <div className="flex-1">
             <label className="text-xs font-bold uppercase tracking-widest text-muted mb-2 block">
-              Previously uploaded material
+              Your materials
             </label>
             {documents.length === 0 ? (
               <div className="text-muted">
-                No uploads yet.{' '}
+                No materials yet.{' '}
                 <button onClick={onGoToUpload} className="text-cardinal underline">
-                  Go to Upload
+                  Add material
                 </button>
               </div>
             ) : (
@@ -566,7 +586,7 @@ export const Summary: React.FC<SummaryProps> = ({
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Yes
                   </>
                 ) : (
-                  'Pending summary'
+                  'Not summarized yet'
                 )}
               </div>
             </div>
@@ -579,15 +599,15 @@ export const Summary: React.FC<SummaryProps> = ({
 
         {selected?.scannedPages && selected.scannedPages.length > 0 && (
           <p className="mt-4 text-sm rounded-xl border border-warning/30 bg-warning-soft text-warning px-4 py-3 font-medium">
-            Note: pages {selected.scannedPages.join(', ')} had little extractable text (possible scans).
-            Diagrams on those pages were not visually analyzed.
+            Pages {selected.scannedPages.join(', ')} have little readable text (they may be scans or diagrams), so they
+            can’t be summarized.
           </p>
         )}
 
         {savedSummaries.length > 0 && (
           <div className="mt-5">
             <div className="text-xs font-bold uppercase tracking-widest text-muted mb-2">
-              Saved summaries — reopen
+              Saved summaries (open one to view it again)
             </div>
             <div className="flex flex-wrap gap-2">
               {savedSummaries.map((s) => (
@@ -647,6 +667,10 @@ export const Summary: React.FC<SummaryProps> = ({
               </>
             )}
           </button>
+          <p className="text-xs text-muted mt-3">
+            Creates a {MODE_OPTIONS.find((m) => m.id === mode)?.label.toLowerCase() || 'summary'} of the concepts this
+            material explains and saves it, so you can reopen it later without generating it again.
+          </p>
 
           {progress && (
             <div className="mt-5">
@@ -685,7 +709,8 @@ export const Summary: React.FC<SummaryProps> = ({
         <>
           {!complete && (
             <div className="mb-4 rounded-2xl border border-warning/30 bg-warning-soft px-5 py-3 text-warning text-sm font-medium">
-              This summary is marked incomplete — some chunks failed or pages lacked extractable text.
+              Some pages couldn’t be summarized, so parts of this document may be missing. See the notes at the end of the
+              Overview, or generate the summary again.
             </div>
           )}
 
@@ -706,37 +731,113 @@ export const Summary: React.FC<SummaryProps> = ({
           </div>
 
           <div className="surface-raised rounded-2xl border border-line p-6 md:p-8 mb-8 min-h-[320px]">
-            {innerTab === 'overview' && (
-              <div className="space-y-6">
-                <section>
-                  <h2 className="text-xl font-extrabold mb-3 flex items-center gap-2">
-                    <BookOpen className="w-5 h-5 text-cardinal" /> Overview
-                  </h2>
-                  <p className="text-ink leading-relaxed">{activeSummary.overview}</p>
-                </section>
-                <section>
-                  <h3 className="font-bold text-ink/80 mb-2">Key Concepts</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {activeSummary.keyConcepts.map((c) => (
-                      <span key={c} className="px-3 py-1 rounded-full bg-cardinal-soft border border-cardinal/30 text-sm">
-                        {c}
-                      </span>
-                    ))}
-                  </div>
-                </section>
-                <section>
-                  <h3 className="font-bold text-ink/80 mb-2">Important Takeaways</h3>
-                  <ul className="list-disc pl-5 space-y-1 text-ink">
-                    {activeSummary.takeaways.map((t) => (
-                      <li key={t}>{t}</li>
-                    ))}
-                  </ul>
-                </section>
-                {activeSummary.coverageNotes.length > 0 && (
+            {innerTab === 'overview' && view && (
+              <div className="space-y-8">
+                {adminOnly ? (
+                  <section className="rounded-2xl border border-info/25 bg-info-soft px-5 py-4">
+                    <h2 className="text-lg font-extrabold mb-1 flex items-center gap-2 text-ink">
+                      <Info className="w-5 h-5 text-info" /> No study topics in this document
+                    </h2>
+                    <p className="text-ink leading-relaxed">{ADMIN_ONLY_MESSAGE}</p>
+                    <p className="text-sm text-muted mt-2">
+                      The course information is below. Practice quizzes and your study plan skip it unless you choose
+                      “Quiz me on course policies” in Challenge or Exam Prep.
+                    </p>
+                    <button
+                      onClick={onGoToUpload}
+                      className="btn-primary mt-4 px-4 py-2 rounded-full text-sm font-bold"
+                    >
+                      Add lecture slides or notes
+                    </button>
+                  </section>
+                ) : (
+                  <>
+                    <section>
+                      <h2 className="text-xl font-extrabold mb-3 flex items-center gap-2">
+                        <BookOpen className="w-5 h-5 text-cardinal" /> What this material teaches
+                      </h2>
+                      <p className="text-ink leading-relaxed">{view.overview}</p>
+                    </section>
+
+                    {view.academicTopics.length > 0 && (
+                      <section>
+                        <h3 className="font-bold text-ink mb-3">Core concepts</h3>
+                        <ul className="space-y-3">
+                          {view.academicTopics.slice(0, 8).map((t) => (
+                            <li key={t.title} className="rounded-xl border border-line bg-sunken px-4 py-3">
+                              <div className="font-semibold text-ink">{t.title}</div>
+                              {t.explanation && (
+                                <p className="text-sm text-ink/80 mt-1 leading-relaxed line-clamp-3">{t.explanation}</p>
+                              )}
+                              {t.sourcePages?.length > 0 && (
+                                <p className="text-xs text-cardinal mt-1">Source: Page {t.sourcePages.join(', ')}</p>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                        {view.academicTopics.length > 8 && (
+                          <button onClick={() => setInnerTab('detailed')} className="mt-2 text-xs font-bold text-cardinal hover:underline">
+                            See all {view.academicTopics.length} topics in Detailed Summary
+                          </button>
+                        )}
+                      </section>
+                    )}
+
+                    {view.takeaways.length > 0 && (
+                      <section>
+                        <h3 className="font-bold text-ink mb-2">Key takeaways</h3>
+                        <ul className="list-disc pl-5 space-y-1 text-ink">
+                          {view.takeaways.slice(0, 6).map((t) => (
+                            <li key={t}>{t}</li>
+                          ))}
+                        </ul>
+                      </section>
+                    )}
+
+                    {view.examples.length > 0 && (
+                      <section>
+                        <h3 className="font-bold text-ink mb-2">Examples from the material</h3>
+                        <ul className="space-y-2 text-sm text-ink">
+                          {view.examples.map((ex) => (
+                            <li key={`${ex.topic}-${ex.text}`}>
+                              <span className="font-semibold">{ex.topic}:</span> {ex.text}
+                              {ex.sourcePages.length > 0 && (
+                                <span className="text-xs text-cardinal"> (p. {ex.sourcePages.join(', ')})</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    )}
+
+                    {view.practiceNext.length > 0 && (
+                      <section>
+                        <h3 className="font-bold text-ink mb-2">What to practice next</h3>
+                        <ul className="list-disc pl-5 space-y-1 text-ink">
+                          {view.practiceNext.map((p) => (
+                            <li key={p}>{p}</li>
+                          ))}
+                        </ul>
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          <button onClick={goPractice} className="btn-secondary px-4 py-2 rounded-full text-xs font-bold">
+                            Practice in Exam Prep
+                          </button>
+                          <button onClick={() => setInnerTab('flashcards')} className="btn-secondary px-4 py-2 rounded-full text-xs font-bold">
+                            Review with flashcards
+                          </button>
+                        </div>
+                      </section>
+                    )}
+                  </>
+                )}
+
+                {view.courseInfo.length > 0 && <CourseInfoSection items={view.courseInfo} defaultOpen={adminOnly} />}
+
+                {view.coverageNotes.length > 0 && (
                   <section className="text-sm rounded-xl border border-warning/30 bg-warning-soft text-warning px-4 py-3 font-medium">
-                    <h3 className="font-bold mb-1 text-ink">Coverage notes</h3>
+                    <h3 className="font-bold mb-1 text-ink">Not fully covered</h3>
                     <ul className="list-disc pl-5 space-y-1">
-                      {activeSummary.coverageNotes.map((n) => (
+                      {view.coverageNotes.map((n) => (
                         <li key={n}>{n}</li>
                       ))}
                     </ul>
@@ -745,10 +846,13 @@ export const Summary: React.FC<SummaryProps> = ({
               </div>
             )}
 
-            {innerTab === 'detailed' && (
+            {innerTab === 'detailed' && view && (
               <div className="space-y-8">
-                <h2 className="text-xl font-extrabold">Complete Topic-by-Topic Summary</h2>
-                {activeSummary.topics.map((t) => (
+                <h2 className="text-xl font-extrabold">Topic-by-topic summary</h2>
+                {view.academicTopics.length === 0 && (
+                  <p className="text-muted">{ADMIN_ONLY_MESSAGE}</p>
+                )}
+                {view.academicTopics.map((t) => (
                   <article key={t.title} className="rounded-2xl border border-line bg-sunken p-5">
                     <h3 className="text-lg font-bold text-cardinal mb-2">{t.title}</h3>
                     <p className="text-ink leading-relaxed whitespace-pre-wrap mb-3">{t.explanation}</p>
@@ -789,24 +893,30 @@ export const Summary: React.FC<SummaryProps> = ({
                       onClick={() => openScheduleModal(t.title)}
                       className="mt-3 text-xs font-bold text-info hover:text-info inline-flex items-center gap-1"
                     >
-                      <CalendarPlus className="w-3.5 h-3.5" /> Add Topic to Study Schedule
+                      <CalendarPlus className="w-3.5 h-3.5" /> Add to Study Schedule
                     </button>
                   </article>
                 ))}
 
+                {view.courseInfo.length > 0 && <CourseInfoSection items={view.courseInfo} defaultOpen />}
+
+                {activeSummary.conceptRelationships.some((r) => !isAdministrativeLabel(r.from) && !isAdministrativeLabel(r.to)) && (
                 <section>
-                  <h3 className="font-bold mb-2">Concept Relationships</h3>
+                  <h3 className="font-bold mb-2">How the concepts connect</h3>
                   <ul className="space-y-1 text-sm text-ink/80">
-                    {activeSummary.conceptRelationships.map((r, i) => (
+                    {activeSummary.conceptRelationships
+                      .filter((r) => !isAdministrativeLabel(r.from) && !isAdministrativeLabel(r.to))
+                      .map((r, i) => (
                       <li key={i}>
                         {r.from} → {r.to}: {r.relationship}
                       </li>
                     ))}
                   </ul>
                 </section>
+                )}
 
                 <section>
-                  <h3 className="font-bold mb-2">Source References</h3>
+                  <h3 className="font-bold mb-2">Source references</h3>
                   <ul className="space-y-2 text-sm text-ink/80">
                     {activeSummary.sourceReferences.map((s, i) => (
                       <li key={i}>
@@ -824,14 +934,17 @@ export const Summary: React.FC<SummaryProps> = ({
                   <h2 className="text-xl font-extrabold flex items-center gap-2">
                     <Layers className="w-5 h-5 text-cardinal" /> Concept Explorer
                   </h2>
-                  <button
-                    onClick={loadConcepts}
-                    disabled={conceptsLoading}
-                    className="btn-secondary px-4 py-2 rounded-full text-sm font-bold"
-                  >
-                    {conceptsLoading ? 'Loading…' : 'Refresh Concepts'}
-                  </button>
+                  {!adminOnly && (
+                    <button
+                      onClick={loadConcepts}
+                      disabled={conceptsLoading}
+                      className="btn-secondary px-4 py-2 rounded-full text-sm font-bold"
+                    >
+                      {conceptsLoading ? 'Loading…' : 'Refresh Concepts'}
+                    </button>
+                  )}
                 </div>
+                {adminOnly && <p className="text-muted">{ADMIN_ONLY_MESSAGE}</p>}
                 {conceptsLoading && concepts.length === 0 && (
                   <div className="flex justify-center py-12">
                     <Loader2 className="w-7 h-7 animate-spin text-cardinal" />
@@ -896,7 +1009,7 @@ export const Summary: React.FC<SummaryProps> = ({
                               className="px-3 py-1.5 rounded-full bg-sunken text-xs font-bold"
                               onClick={goPractice}
                             >
-                              Exam Prep
+                              Practice in Exam Prep
                             </button>
                             <button
                               className="px-3 py-1.5 rounded-full bg-sunken text-xs font-bold"
@@ -917,7 +1030,7 @@ export const Summary: React.FC<SummaryProps> = ({
               <div>
                 <h2 className="text-xl font-extrabold mb-4">Definitions and Formulas</h2>
                 <div className="space-y-3">
-                  {activeSummary.definitionsAndFormulas.map((d, i) => (
+                  {(view?.definitionsAndFormulas || []).map((d, i) => (
                     <div key={i} className="rounded-2xl border border-line bg-sunken p-4">
                       <div className="font-bold text-cardinal">{d.term}</div>
                       <div className="text-ink mt-1">{d.definition}</div>
@@ -929,8 +1042,8 @@ export const Summary: React.FC<SummaryProps> = ({
                       )}
                     </div>
                   ))}
-                  {activeSummary.definitionsAndFormulas.length === 0 && (
-                    <p className="text-muted">No definitions extracted yet.</p>
+                  {(view?.definitionsAndFormulas.length ?? 0) === 0 && (
+                    <p className="text-muted">This summary doesn’t include any definitions or formulas.</p>
                   )}
                 </div>
               </div>
@@ -1060,8 +1173,16 @@ export const Summary: React.FC<SummaryProps> = ({
                   </div>
                 </div>
 
+                {flashNotice && (
+                  <p className="mb-4 rounded-xl border border-info/25 bg-info-soft px-4 py-3 text-sm text-ink">{flashNotice}</p>
+                )}
                 {!deck?.cards?.length ? (
-                  <p className="text-muted">Generate a deck from this material to start reviewing.</p>
+                  !flashNotice && (
+                    <p className="text-muted">
+                      Generate Flashcards creates 12 question-and-answer cards from this material’s concepts and saves them
+                      for later review.
+                    </p>
+                  )
                 ) : (
                   <div
                     className="max-w-xl mx-auto -mx-2 px-2 py-4 rounded-2xl cursor-pointer select-none"
@@ -1158,18 +1279,26 @@ export const Summary: React.FC<SummaryProps> = ({
 
             {innerTab === 'exam_notes' && (
               <div className="space-y-6">
-                <h2 className="text-xl font-extrabold">Exam Revision Notes</h2>
+                <h2 className="text-xl font-extrabold">Exam revision notes</h2>
+                {(view?.examRevisionNotes.length ?? 0) === 0 && (
+                  <p className="text-muted">{adminOnly ? ADMIN_ONLY_MESSAGE : 'No revision notes in this summary.'}</p>
+                )}
                 <ul className="list-disc pl-5 space-y-2 text-ink">
-                  {activeSummary.examRevisionNotes.map((n) => (
+                  {(view?.examRevisionNotes || []).map((n) => (
                     <li key={n}>{n}</li>
                   ))}
                 </ul>
-                <h3 className="font-bold">Topics to Review</h3>
-                <p className="text-xs text-muted mb-2">
-                  Suggestions based on material importance — not proven weaknesses unless quiz data supports them.
-                </p>
+                {(view?.topicsToReview.length ?? 0) > 0 && (
+                  <>
+                    <h3 className="font-bold">Topics worth reviewing</h3>
+                    <p className="text-xs text-muted mb-2">
+                      Picked because the material emphasizes them, not because of your quiz results. Click one to add it
+                      to your Study Schedule.
+                    </p>
+                  </>
+                )}
                 <div className="flex flex-wrap gap-2">
-                  {activeSummary.topicsToReview.map((t) => (
+                  {(view?.topicsToReview || []).map((t) => (
                     <button
                       key={t}
                       onClick={() => openScheduleModal(t)}
@@ -1185,20 +1314,20 @@ export const Summary: React.FC<SummaryProps> = ({
             {innerTab === 'original' && (
               <div>
                 <h2 className="text-xl font-extrabold mb-4 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-cardinal" /> Original extracted pages
+                  <FileText className="w-5 h-5 text-cardinal" /> Original text
                 </h2>
                 <p className="text-sm text-muted mb-4">
-                  Text extracted at upload time. Scanned image pages may be empty.
+                  The text TrojanMind imported from this material, page by page. Scanned pages may be empty.
                 </p>
                 <div className="space-y-4 max-h-[520px] overflow-y-auto pr-2">
                   {pages.map((p) => (
                     <div key={p.page} className="rounded-2xl border border-line p-4">
                       <div className="text-xs font-bold uppercase tracking-widest text-cardinal mb-2">
                         Page {p.page}
-                        {p.isEmpty || p.likelyScanned ? ' · little/no text' : ''}
+                        {p.isEmpty || p.likelyScanned ? ' · little or no readable text' : ''}
                       </div>
                       <pre className="whitespace-pre-wrap text-sm text-ink/80 font-sans">
-                        {p.text || '[No extractable text]'}
+                        {p.text || '[No readable text on this page]'}
                       </pre>
                     </div>
                   ))}
@@ -1225,21 +1354,19 @@ export const Summary: React.FC<SummaryProps> = ({
             <button onClick={handleCopy} className="btn-secondary px-5 py-3 rounded-full font-bold text-sm inline-flex items-center gap-2">
               <Copy className="w-4 h-4" /> Copy
             </button>
-            <button onClick={goPractice} className="btn-secondary px-5 py-3 rounded-full font-bold text-sm inline-flex items-center gap-2">
-              <Brain className="w-4 h-4" /> Open Exam Prep
-            </button>
-            <button
-              onClick={() =>
-                openScheduleModal(
-                  activeSummary.topics[0]?.title ||
-                    activeSummary.keyConcepts[0] ||
-                    'Review material'
-                )
-              }
-              className="btn-secondary px-5 py-3 rounded-full font-bold text-sm inline-flex items-center gap-2"
-            >
-              <CalendarPlus className="w-4 h-4" /> Add Topic to Schedule
-            </button>
+            {!adminOnly && (
+              <button onClick={goPractice} className="btn-secondary px-5 py-3 rounded-full font-bold text-sm inline-flex items-center gap-2">
+                <Brain className="w-4 h-4" /> Practice in Exam Prep
+              </button>
+            )}
+            {view && view.academicTopics.length > 0 && (
+              <button
+                onClick={() => openScheduleModal(view.academicTopics[0].title)}
+                className="btn-secondary px-5 py-3 rounded-full font-bold text-sm inline-flex items-center gap-2"
+              >
+                <CalendarPlus className="w-4 h-4" /> Add “{view.academicTopics[0].title}” to Schedule
+              </button>
+            )}
           </div>
         </>
       )}
@@ -1273,7 +1400,7 @@ export const Summary: React.FC<SummaryProps> = ({
                           : 'bg-sunken text-muted border-line'
                   }`}
                 >
-                  {scheduleSuggestion.priority} priority
+                  {scheduleSuggestion.band === 'unknown' ? 'Not assessed' : `${scheduleSuggestion.priority} priority`}
                 </span>
               )}
             </div>
@@ -1281,7 +1408,7 @@ export const Summary: React.FC<SummaryProps> = ({
             {scheduleReason && (
               <div className="mb-4 rounded-xl border border-line border-l-4 border-l-cardinal bg-sunken/80 px-3.5 py-3">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-cardinal mb-1 inline-flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" /> Coach suggestion
+                  <Sparkles className="w-3 h-3" /> Why this topic
                 </p>
                 <p className="text-sm text-ink leading-relaxed">{scheduleReason}</p>
                 <button
@@ -1289,14 +1416,14 @@ export const Summary: React.FC<SummaryProps> = ({
                   onClick={applySuggestionDefaults}
                   className="mt-2 text-xs font-bold text-cardinal hover:underline"
                 >
-                  Reset to suggested date &amp; time
+                  Reset to the suggested day and time
                 </button>
               </div>
             )}
 
             {scheduleFocus && (
               <div className="mb-4">
-                <label className="text-xs font-bold uppercase text-muted">What to study in this block</label>
+                <label className="text-xs font-bold uppercase text-muted">What to do in this session</label>
                 <textarea
                   value={scheduleFocus}
                   onChange={(e) => setScheduleFocus(e.target.value)}
@@ -1410,7 +1537,8 @@ export const Summary: React.FC<SummaryProps> = ({
             </div>
 
             <div className="mb-5">
-              <label className="text-xs font-bold uppercase text-muted">Duration</label>
+              <label className="text-xs font-bold uppercase text-muted">Estimated time</label>
+              <p className="text-[11px] text-muted mt-0.5">A rough estimate. Change it to fit your day.</p>
               <div className="flex flex-wrap gap-2 mt-1.5 mb-2">
                 {(scheduleSuggestion?.altDurations || [25, 45, 60, 90]).map((m) => (
                   <button
@@ -1424,16 +1552,15 @@ export const Summary: React.FC<SummaryProps> = ({
                     }`}
                   >
                     {m} min
-                    {m === scheduleSuggestion?.durationMinutes ? ' · suggested' : ''}
                   </button>
                 ))}
               </div>
               <input
                 type="number"
-                min={15}
-                max={180}
+                min={5}
+                max={240}
                 value={scheduleMins}
-                onChange={(e) => setScheduleMins(Number(e.target.value) || 45)}
+                onChange={(e) => setScheduleMins(Number(e.target.value) || 30)}
                 className="w-full bg-sunken border border-line rounded-xl px-3 py-2 text-sm"
               />
             </div>
@@ -1452,13 +1579,57 @@ export const Summary: React.FC<SummaryProps> = ({
                 disabled={!scheduleDate}
                 className="btn-primary px-4 py-2 rounded-full text-sm font-bold disabled:opacity-50"
               >
-                Save planned block
+                Add to Study Schedule
               </button>
             </div>
           </div>
         </div>
       )}
     </div>
+  );
+};
+
+/** Course logistics, kept available but outside academic practice. */
+const CourseInfoSection: React.FC<{ items: CourseInfoItem[]; defaultOpen?: boolean }> = ({ items, defaultOpen = false }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="rounded-2xl border border-line bg-sunken">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left"
+      >
+        <span>
+          <span className="font-bold text-ink flex items-center gap-2">
+            <ClipboardList className="w-4 h-4 text-muted" /> Course information
+          </span>
+          <span className="block text-xs text-muted mt-0.5">
+            Deadlines, grading and course policies ({items.length}). Not included in practice or your study plan.
+          </span>
+        </span>
+        <ChevronDown className={`w-5 h-5 shrink-0 text-muted transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-5 pb-5 space-y-4 border-t border-line pt-4">
+          {items.map((c) => (
+            <div key={c.title}>
+              <div className="font-semibold text-ink text-sm">{c.title}</div>
+              {c.details.length > 0 && (
+                <ul className="list-disc pl-5 mt-1 space-y-0.5 text-sm text-ink/80">
+                  {c.details.map((d) => (
+                    <li key={d}>{d}</li>
+                  ))}
+                </ul>
+              )}
+              {c.sourcePages.length > 0 && (
+                <p className="text-xs text-cardinal mt-1">Source: Page {c.sourcePages.join(', ')}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 };
 

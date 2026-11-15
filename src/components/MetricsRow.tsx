@@ -4,9 +4,13 @@
 import React from 'react';
 
 interface MetricsRowProps {
-  challengesDone: number;
+  quizzesTaken: number;
+  /** Plain average of recorded quiz scores, in percent. */
   avgScore: number;
-  gapsCount: number;
+  /** Assessed academic topics with missed questions. */
+  topicsToReview: number;
+  /** Too few quizzes to call it a trend. */
+  isEarly: boolean;
 }
 
 function MetricCard({ label, value, sub, icon }: { label: string; value: number; sub?: string; icon: string }) {
@@ -22,12 +26,20 @@ function MetricCard({ label, value, sub, icon }: { label: string; value: number;
   );
 }
 
-export const MetricsRow: React.FC<MetricsRowProps> = ({ challengesDone, avgScore, gapsCount }) => {
+export const MetricsRow: React.FC<MetricsRowProps> = ({ quizzesTaken, avgScore, topicsToReview, isEarly }) => {
   return (
-    <div className="flex gap-3 sm:gap-4 mb-8">
-      <MetricCard icon="🎯" label="Challenges done"   value={challengesDone} />
-      <MetricCard icon="🧠" label="Avg understanding" value={avgScore} sub="/100" />
-      <MetricCard icon="⚡" label="Gaps to close"     value={gapsCount} />
+    <div className="mb-8">
+      <div className="flex gap-3 sm:gap-4">
+        <MetricCard icon="🎯" label="Quizzes taken" value={quizzesTaken} />
+        <MetricCard icon="📝" label="Average quiz score" value={avgScore} sub="%" />
+        <MetricCard icon="🔁" label="Topics to review" value={topicsToReview} />
+      </div>
+      {isEarly && (
+        <p className="text-xs text-muted mt-3 text-center">
+          Early practice results from {quizzesTaken} quiz{quizzesTaken === 1 ? '' : 'zes'}. A few more quizzes are needed
+          to see a reliable trend.
+        </p>
+      )}
     </div>
   );
 };

@@ -14,6 +14,12 @@ import {
 } from '../services/firebaseService';
 import { generateQuizFromContent, generateClaudeCompetitorAnswers, generateFallbackQuiz } from '../services/quizService';
 import { cleanStudyContent } from '../services/contentService';
+import {
+  ADMIN_ONLY_MESSAGE,
+  MIN_ACADEMIC_CHARS,
+  classifyDocumentText,
+  isAcademicTopicName,
+} from '../services/contentClassification';
 import { useStore } from '../store/store';
 import QuizQuestion from './QuizQuestion';
 import { Trash2, Trash } from 'lucide-react';
@@ -27,6 +33,7 @@ type QuizPhase =
   | 'loading' 
   | 'no-content' 
   | 'generation-error' 
+  | 'admin-only'
   | 'quiz' 
   | 'results';
 
@@ -42,7 +49,11 @@ interface QuestionResult {
   isCorrect: boolean;
   explanation?: string;
   topic?: string;
+  /** The timer ran out before an answer was chosen. */
+  unanswered?: boolean;
 }
+
+type QuizFocus = 'academic' | 'course_policies';
 
 const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocumentIds?: string[] }> = ({ onAddMaterial, preselectDocumentIds }) => {
   const allAttempts = useStore((s) => s.allAttempts);
@@ -63,6 +74,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
   const [savedAttemptId, setSavedAttemptId] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [isAnswering, setIsAnswering] = useState(false);
+  const [quizFocus, setQuizFocus] = useState<QuizFocus>('academic');
 
   const { currentQuiz, setQuiz, clearQuizAnswers } = useStore();
   const timerRef = useRef<any>(null);
@@ -221,6 +233,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
   // ── ACTIONS ──────────────────────────────────────────────────────────────
 
   const handleCreateRoom = async () => {
+    setQuizFocus('academic'); // each new challenge starts on academic content
     console.log(`[Challenge] Creating ${isSoloMode ? 'solo' : 'multiplayer'} room...`);
     const selected = documents.filter(d => selectedDocIds.has(d.id!));
     const newSession = await createChallengeSession(
@@ -238,8 +251,34 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
     }
   };
 
-  const handleStartChallenge = async () => {
+  /**
+   * Text to quiz on. Academic quizzes skip deadlines, grading and other course
+   * logistics; returns null when the selection has no academic content.
+   */
+  const sourceTextFor = (focus: QuizFocus): string | null => {
+    if (!session) return null;
+    const selectedDocs = documents.filter(d => session.docIds.includes(d.id!));
+    const classified = classifyDocumentText(selectedDocs.map(d => d.rawText).join('\n\n'));
+    if (focus === 'academic') {
+      return classified.academicChars < MIN_ACADEMIC_CHARS ? null : classified.academicText;
+    }
+    return classified.administrativeText.trim() ? classified.administrativeText : null;
+  };
+
+  const handleStartChallenge = async (focusOverride?: QuizFocus) => {
     if (!session) return;
+    const focus: QuizFocus = focusOverride ?? quizFocus;
+    setQuizFocus(focus);
+    const sourceText = sourceTextFor(focus);
+    if (!sourceText) {
+      if (focus === 'academic') {
+        setPhase('admin-only');
+      } else {
+        setGenerationError('No course policies were found in the selected material.');
+        setPhase('generation-error');
+      }
+      return;
+    }
     console.log(`[Challenge] Host starting challenge for session: ${session.id}`);
     console.log(`[Challenge] Quiz generation started with count: ${session.questionCount}`);
     setPhase('loading');
@@ -250,16 +289,13 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
     console.groupEnd();
 
     try {
-      const selectedDocs = documents.filter(d => session.docIds.includes(d.id!));
-      const rawContent = selectedDocs.map(d => d.rawText).join('\n\n---\n\n');
-      
       console.group(`[Challenge-Pipeline] Data Ingestion & Cleaning`);
-      const { cleanedText, originalLength, cleanedLength, detectedTopics } = cleanStudyContent(rawContent);
+      const { cleanedText, originalLength, cleanedLength, detectedTopics } = cleanStudyContent(sourceText);
       console.log(`Input Analysis: { originalLength: ${originalLength}, cleanedLength: ${cleanedLength}, topics: ${detectedTopics.length} }`);
       console.groupEnd();
 
       console.log(`[Challenge-Pipeline] Requesting ${session.questionCount} MCQ-only questions from Service...`);
-      const rawQuestions = await generateQuizFromContent(cleanedText, session.questionCount);
+      const rawQuestions = await generateQuizFromContent(cleanedText, session.questionCount, { focus });
       // Challenge is MCQ-only — drop anything without 4 options
       const questions = rawQuestions
         .map((q, i) => ({
@@ -323,19 +359,27 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
     setLoadingStep('generating');
     
     try {
-      const selectedDocs = documents.filter(d => session.docIds.includes(d.id!));
-      const combinedContent = selectedDocs.map(d => d.rawText).join('\n\n---\n\n');
-      
+      const sourceText = sourceTextFor(quizFocus);
+      if (!sourceText) {
+        setPhase(quizFocus === 'academic' ? 'admin-only' : 'generation-error');
+        return;
+      }
       console.log(`[Challenge] Requesting rule-based fallback from QuizService...`);
-      const questions = (await generateFallbackQuiz(combinedContent, session.questionCount))
+      const questions = (await generateFallbackQuiz(sourceText, session.questionCount))
         .map((q, i) => ({
           ...q,
           id: q.id || `fb${i + 1}`,
           type: 'mcq' as const,
           options: (q.options || []).map((o) => String(o).trim()).filter(Boolean).slice(0, 4),
         }))
-        .filter((q) => q.options.length >= 2);
-      
+        .filter((q) => q.options.length >= 2)
+        .map((q) => (quizFocus === 'course_policies' ? { ...q, sourceTopic: `Course policies · ${q.sourceTopic || 'General'}` } : q));
+      if (!questions.length) {
+        setGenerationError('There isn’t enough text in this material to build questions without AI. Try the AI generation again.');
+        setPhase('generation-error');
+        return;
+      }
+
       await updateSession(session.id, {
         questions,
         status: 'active',
@@ -357,14 +401,16 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
     
     console.log(`[Challenge-Pipeline] Question ${currentQuestionIndex + 1} Answered. Correct: ${isCorrect}`);
 
+    const unanswered = answer === 'TIME_OUT';
     const result: QuestionResult = {
       questionId: currentQuestion.id,
       questionText: currentQuestion.question,
-      userAnswer: answer,
+      userAnswer: unanswered ? '' : answer,
       correctAnswer: currentQuestion.correctAnswer,
-      isCorrect: !!isCorrect,
+      isCorrect: !unanswered && !!isCorrect,
       explanation: currentQuestion.explanation,
-      topic: currentQuestion.sourceTopic
+      topic: currentQuestion.sourceTopic,
+      unanswered,
     };
 
     const newResults = [...results, result];
@@ -418,10 +464,12 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
           correctAnswer: r.correctAnswer,
           isCorrect: !!r.isCorrect,
           explanation: r.explanation || null,
-          topic: r.topic || "General"
+          topic: r.topic || "General",
+          unanswered: !!r.unanswered,
         })),
-        weakTopics: Array.from(new Set(finalResults.filter(r => !r.isCorrect).map(r => r.topic || 'General'))),
-        strongTopics: Array.from(new Set(finalResults.filter(r => r.isCorrect).map(r => r.topic || 'General'))),
+        // Weak/strong topics: answered questions on academic concepts only.
+        weakTopics: Array.from(new Set(finalResults.filter(r => !r.isCorrect && !r.unanswered && isAcademicTopicName(r.topic)).map(r => r.topic as string))),
+        strongTopics: Array.from(new Set(finalResults.filter(r => r.isCorrect && isAcademicTopicName(r.topic)).map(r => r.topic as string))),
         generatedFromContentLength: selectedDocs.length
       };
 
@@ -729,7 +777,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
           </div>
 
           {isHost ? (
-            <button onClick={handleStartChallenge} className="btn-primary px-10 py-4 rounded-xl font-semibold text-lg w-full">
+            <button onClick={() => void handleStartChallenge()} className="btn-primary px-10 py-4 rounded-xl font-semibold text-lg w-full">
                {isSoloMode ? "Start Solo Challenge" : (players.length === 1 ? "Start vs Claude AI" : "Start Live Challenge")}
             </button>
           ) : (
@@ -849,21 +897,23 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
         {/* Per Player List */}
         <div className="space-y-4 mb-14 animate-fade-in" key={activeReviewPlayer}>
            {(session ? session.questions : currentQuiz!).map((q, idx) => {
-             const userAns = session ? session.participants[activeReviewPlayer]?.results?.answers[q.id] : results[idx]?.userAnswer;
-             const isCorrect = session ? (userAns === q.correctAnswer) : results[idx]?.isCorrect;
+             const rawAns = session ? session.participants[activeReviewPlayer]?.results?.answers[q.id] : results[idx]?.userAnswer;
+             const isUnanswered = !rawAns || rawAns === 'TIME_OUT' || (!session && !!results[idx]?.unanswered);
+             const userAns = isUnanswered ? '' : rawAns;
+             const isCorrect = !isUnanswered && (session ? (userAns === q.correctAnswer) : results[idx]?.isCorrect);
 
              return (
-               <div key={idx} className={`surface rounded-2xl p-5 md:p-7 border-l-4 ${isCorrect ? 'border-l-success' : 'border-l-danger'}`}>
+               <div key={idx} className={`surface rounded-2xl p-5 md:p-7 border-l-4 ${isCorrect ? 'border-l-success' : isUnanswered ? 'border-l-line-strong' : 'border-l-danger'}`}>
                  <div className="flex items-start justify-between gap-4 mb-4">
                     <h4 className="text-base md:text-lg font-semibold text-ink">{q.question}</h4>
-                    <span className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${isCorrect ? 'bg-success-soft text-success border-success/25' : 'bg-danger-soft text-danger border-danger/25'}`}>
-                      {isCorrect ? 'Correct' : 'Incorrect'}
+                    <span className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${isCorrect ? 'bg-success-soft text-success border-success/25' : isUnanswered ? 'bg-sunken text-muted border-line' : 'bg-danger-soft text-danger border-danger/25'}`}>
+                      {isCorrect ? 'Correct' : isUnanswered ? 'Unanswered' : 'Incorrect'}
                     </span>
                  </div>
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm font-semibold">
                     <div className="p-4 rounded-xl bg-canvas border border-line">
                        <p className="text-muted uppercase tracking-wider text-[10px] mb-2">{activeReviewPlayer === getUserId() ? "Your Answer" : `${session?.participants[activeReviewPlayer]?.name || 'Player'}'s Answer`}</p>
-                       <p className={isCorrect ? 'text-success' : 'text-danger'}>{userAns || "Missing"}</p>
+                       <p className={isCorrect ? 'text-success' : isUnanswered ? 'text-muted' : 'text-danger'}>{isUnanswered ? 'No answer (time ran out)' : userAns}</p>
                     </div>
                     <div className="p-4 rounded-xl bg-canvas border border-line">
                        <p className="text-muted uppercase tracking-wider text-[10px] mb-2">Ideal Answer</p>
@@ -883,6 +933,35 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
     );
   }
 
+  if (phase === 'admin-only') {
+    return (
+      <div className="max-w-2xl mx-auto py-14 md:py-20 text-center animate-fade-in">
+        <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight mb-4 text-ink">No topics to practice yet</h2>
+        <p className="text-ink mb-3">{ADMIN_ONLY_MESSAGE}</p>
+        <p className="text-sm text-muted mb-8">
+          You can still quiz yourself on the course rules, such as deadlines and grading. Those results are kept
+          separate from your topic practice and study plan.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          {onAddMaterial && (
+            <button onClick={onAddMaterial} className="btn-primary px-8 py-4 rounded-xl font-semibold text-base">
+              Add lecture material
+            </button>
+          )}
+          <button
+            onClick={() => void handleStartChallenge('course_policies')}
+            className="btn-secondary px-8 py-4 rounded-xl font-semibold text-base"
+          >
+            Quiz me on course policies
+          </button>
+        </div>
+        <button onClick={() => setPhase('selection')} className="btn-link">
+          ← Back to materials
+        </button>
+      </div>
+    );
+  }
+
   if (phase === 'generation-error') {
     return (
       <div className="max-w-2xl mx-auto py-14 md:py-20 text-center animate-fade-in">
@@ -895,8 +974,8 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocume
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-          <button 
-            onClick={handleStartChallenge} 
+          <button
+            onClick={() => void handleStartChallenge()}
             className="btn-primary px-8 py-4 rounded-xl font-semibold text-base"
           >
             Retry AI Generation

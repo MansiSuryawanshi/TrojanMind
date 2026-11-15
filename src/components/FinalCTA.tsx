@@ -1,40 +1,56 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion';
 import { ArrowRight, Upload } from 'lucide-react';
+import TrojanHelmet from './home/TrojanHelmet';
+import { EASE, usePress } from './home/motion';
+import './home/home.css';
 
 interface FinalCTAProps {
   onCourses: () => void;
   onUpload: () => void;
 }
 
-const FinalCTA: React.FC<FinalCTAProps> = ({ onCourses, onUpload }) => (
-  <section className="py-20 md:py-28 px-4 sm:px-6 lg:px-8" aria-labelledby="cta-title">
-    <div className="tm-cta relative overflow-hidden max-w-5xl mx-auto rounded-3xl px-6 py-14 sm:px-12 md:py-16 text-center">
-      <div className="tm-hero-grid absolute inset-0 opacity-60" aria-hidden="true" />
-      <div className="relative">
-        <p className="eyebrow !text-gold mb-4">Ready when you are</p>
-        <h2 id="cta-title" className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.1] text-[color:var(--tm-on-dark)] mb-5">
-          Start with your courses.
-        </h2>
-        <p className="text-lg text-[color:var(--tm-on-dark-muted)] max-w-xl mx-auto mb-10 leading-relaxed">
-          See what’s in each of your Brightspace courses, or upload your own notes and go straight to a challenge.
-        </p>
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6">
-          <button type="button" onClick={onCourses} className="tm-btn-gold w-full sm:w-auto px-8 py-4 rounded-xl font-semibold text-base group">
-            Go to My Courses
-            <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={onUpload}
-            className="inline-flex items-center gap-2 py-2 text-sm font-semibold text-[color:var(--tm-on-dark)] underline decoration-gold/60 underline-offset-4 hover:decoration-gold cursor-pointer"
-          >
-            <Upload size={16} aria-hidden="true" />
-            Upload materials instead
-          </button>
-        </div>
+const FinalCTA: React.FC<FinalCTAProps> = ({ onCourses, onUpload }) => {
+  const ref = useRef<HTMLElement>(null);
+  const reduce = useReducedMotion();
+  const press = usePress();
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end end'] });
+  const helmY = useTransform(scrollYProgress, [0, 1], reduce ? [0, 0] : [140, -20]);
+  const rise = (i: number) => ({
+    initial: reduce ? false : { y: '70%', opacity: 0.2 },
+    whileInView: reduce ? undefined : { y: 0, opacity: 1 },
+    viewport: { once: true, amount: 0.6 },
+    transition: { duration: 0.9, ease: EASE, delay: 0.08 + i * 0.12 },
+  });
+  return (
+  <section ref={ref} className="tmh tmh-final" aria-labelledby="cta-title">
+    <div className="tmh-final-inner">
+      <p className="tmh-kicker tmh-kicker--on-ink">Ready when you are</p>
+      <h2 id="cta-title" className="tmh-final-title">
+        <span className="tmh-reveal-mask"><motion.span style={{ display: 'block' }} {...rise(0)}>Start with</motion.span></span>
+        <span className="tmh-reveal-mask"><motion.em style={{ display: 'block' }} {...rise(1)}>your courses.</motion.em></span>
+      </h2>
+      <p className="tmh-final-copy">
+        See what’s in each of your Brightspace courses, or upload your own notes and go straight to a challenge.
+      </p>
+      <div className="tmh-final-actions">
+        <motion.button type="button" onClick={onCourses} className="tmh-btn tmh-btn--gold" {...press}>
+          Go to My Courses
+          <ArrowRight size={18} aria-hidden="true" />
+        </motion.button>
+        <button type="button" onClick={onUpload} className="tmh-link" style={{ color: 'var(--h-on-ink)' }}>
+          <Upload size={16} aria-hidden="true" />
+          Upload materials instead
+        </button>
+      </div>
+      <div className="tmh-final-helm" aria-hidden="true">
+        <motion.div style={{ y: helmY }} className="tmh-fill">
+          <TrojanHelmet className="tmh-helm-svg" />
+        </motion.div>
       </div>
     </div>
   </section>
-);
+  );
+};
 
 export default FinalCTA;

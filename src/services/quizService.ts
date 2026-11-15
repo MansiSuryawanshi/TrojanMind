@@ -14,6 +14,16 @@ export interface GeneratedQuestion {
 import { ANTHROPIC_MODEL, ANTHROPIC_FALLBACK_MODEL } from "../config/aiConfig";
 
 import { AI_ENDPOINT as CLAUDE_URL, aiFetch } from './aiClient';
+import { COURSE_POLICY_TOPIC_PREFIX } from './contentClassification';
+
+export interface QuizOptions {
+  /**
+   * 'academic' (default): subject-matter questions only.
+   * 'course_policies': questions about the course's stated rules; topics are
+   * prefixed so they never count as academic weak areas.
+   */
+  focus?: 'academic' | 'course_policies';
+}
 
 /** Strip PDF page markers and noise so quizzes never quote "--- Page 1 ---". */
 export function cleanContentForQuiz(content: string): string {
@@ -145,15 +155,29 @@ async function callQuizClaude(prompt: string, maxTokens = 3500): Promise<string>
 /**
  * Generates an MCQ-only quiz from the provided study material using the Claude API.
  */
-export async function generateQuizFromContent(content: string, questionCount: number = 5): Promise<GeneratedQuestion[]> {
+export async function generateQuizFromContent(
+  content: string,
+  questionCount: number = 5,
+  options: QuizOptions = {}
+): Promise<GeneratedQuestion[]> {
+  const focus = options.focus ?? 'academic';
   const cleaned = cleanContentForQuiz(content).slice(0, 14000);
+  const tagTopic = (q: GeneratedQuestion): GeneratedQuestion =>
+    focus === 'course_policies'
+      ? { ...q, sourceTopic: `${COURSE_POLICY_TOPIC_PREFIX} · ${q.sourceTopic || 'General'}` }
+      : q;
   console.group(`[QuizService-Pipeline] MCQ GENERATION START`);
 
   if (cleaned.length < 80) {
     console.warn('Material too short for grounded quiz.');
     console.groupEnd();
-    return generateFallbackQuiz(content, questionCount);
+    return (await generateFallbackQuiz(content, questionCount)).map(tagTopic);
   }
+
+  const focusRule =
+    focus === 'course_policies'
+      ? '10. This material is course policy and logistics. Ask only about the rules it states (deadlines, grading, attendance, submissions). sourceTopic is the policy name.'
+      : '10. Ask only about subject matter. Never ask about deadlines, grading, attendance, submission or communication policies, even if they appear in the material.';
 
   const prompt = `Create a Multiple Choice quiz STRICTLY from this study material.
 
@@ -171,6 +195,7 @@ Rules:
 6. Do NOT invent concepts not present in the material.
 7. Prefer conceptual / application questions over trivial wording matches.
 8. type must always be "mcq".
+${focusRule}
 9. Return ONLY a JSON array:
 [
   {
@@ -207,15 +232,15 @@ Rules:
     if (accepted.length < questionCount) {
       const topUp = await generateFallbackQuiz(content, questionCount - accepted.length);
       console.groupEnd();
-      return [...accepted, ...topUp].slice(0, questionCount);
+      return [...accepted, ...topUp].slice(0, questionCount).map(tagTopic);
     }
 
     console.groupEnd();
-    return accepted.slice(0, questionCount);
+    return accepted.slice(0, questionCount).map(tagTopic);
   } catch (error) {
     console.error('[QuizService] Claude quiz failed, using grounded fallback:', error);
     console.groupEnd();
-    return generateFallbackQuiz(content, questionCount);
+    return (await generateFallbackQuiz(content, questionCount)).map(tagTopic);
   }
 }
 
@@ -252,23 +277,9 @@ export async function generateFallbackQuiz(content: string, count: number): Prom
     const id = `fb-mcq-${i}-${Date.now()}`;
     const s = sentences[i % Math.max(sentences.length, 1)];
 
-    if (!s || uniquePhrases.length < 4) {
-      questions.push({
-        id,
-        type: 'mcq',
-        question: 'Based on the uploaded material, what is the best next study action?',
-        options: [
-          'Review the core concepts and definitions in the notes',
-          'Ignore the uploaded material entirely',
-          'Only memorize page numbers',
-          'Skip difficult sections permanently',
-        ],
-        correctAnswer: 'Review the core concepts and definitions in the notes',
-        explanation: 'Fallback used because the material was too thin to build a specific item.',
-        sourceTopic: 'Study strategy',
-      });
-      continue;
-    }
+    // Too little text to ground a question: return fewer questions rather than
+    // a generic one that would count toward the score without testing content.
+    if (!s || uniquePhrases.length < 4) break;
 
     const keys = extractKeyPhrases(s);
     const correct = keys[0] || uniquePhrases[i % uniquePhrases.length];
@@ -297,6 +308,7 @@ export async function generateFallbackQuiz(content: string, count: number): Prom
 
   const good = questions.filter(validateQuestionQuality);
   return (good.length ? good : questions).slice(0, count);
+
 }
 
 /**

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ReadinessScore } from './ReadinessScore';
 import { WeakAreas } from './WeakAreas';
 import { CrossExamination } from './CrossExamination';
@@ -18,7 +18,6 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
   onGoToSchedule,
   onGoToChallenge,
 }) => {
-  const readinessScore   = useStore((s) => s.readinessScore);
   const setTopicProgress = useStore((s) => s.setTopicProgress);
   const setWeakAreas     = useStore((s) => s.setWeakAreas);
   const setReadinessScore = useStore((s) => s.setReadinessScore);
@@ -40,6 +39,7 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
 
   // Derived check for empty state
   const hasData = allAttempts.length > 0;
+  const analytics = useMemo(() => deriveStudentAnalytics(allAttempts), [allAttempts]);
 
   /** Standard calculation for the countdown. */
   const calculateDaysLeft = (targetDate: string) => {
@@ -57,7 +57,7 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
     if (!isInitialLoadComplete && allAttempts.length === 0) return;
 
     console.group("[ExamPrep-REACTIVE] Syncing Analytics");
-    const analytics = deriveStudentAnalytics(allAttempts, daysLeft);
+    const analytics = deriveStudentAnalytics(allAttempts);
     
     setTopicProgress(mapStatsToProgress(analytics.topicStats));
     setWeakAreas(analytics.weakTopics);
@@ -71,7 +71,9 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
   // Seed focus to weakest topic once data lands
   useEffect(() => {
     if (focusTopic || !topicProgress.length) return;
-    const weakest = [...topicProgress].sort((a, b) => a.percentage - b.percentage)[0];
+    const weakest = topicProgress
+      .filter((t) => t.percentage != null)
+      .sort((a, b) => (a.percentage as number) - (b.percentage as number))[0];
     if (weakest) setFocusTopic(weakest.name);
   }, [topicProgress, focusTopic]);
 
@@ -94,13 +96,15 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
     }
   };
 
-  const getReadinessPill = (score: number) => {
-    if (score >= 75) return { label: 'Ready!',        cls: 'ep-pill-green' };
-    if (score >= 50) return { label: 'Almost there',  cls: 'ep-pill-gold' };
-    return              { label: 'Not ready yet',     cls: 'ep-pill-amber' };
+  // Describes quiz practice only; it is not a verdict on exam readiness.
+  const getScorePill = (score: number, early: boolean) => {
+    if (early)       return { label: 'Early results',       cls: 'ep-pill-gold' };
+    if (score >= 75) return { label: 'Scoring well',        cls: 'ep-pill-green' };
+    if (score >= 50) return { label: 'Building up',         cls: 'ep-pill-gold' };
+    return              { label: 'Needs more practice',  cls: 'ep-pill-amber' };
   };
 
-  const pill = getReadinessPill(readinessScore);
+  const pill = getScorePill(analytics.avgQuizScore, analytics.isEarlyResult);
 
   const startCrossExam = (topic: string) => {
     setFocusTopic(topic);
@@ -127,11 +131,11 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
       {/* ── Page header ── */}
       <div className="ep-header">
         <div className="ep-header-left">
-          <h1 className="ep-title">Exam Readiness</h1>
+          <h1 className="ep-title">Exam Prep</h1>
           <p className="ep-subtitle">
             {daysLeft !== null && daysLeft <= 7
-              ? 'Critical window: follow the red → amber → green path your coach builds below.'
-              : 'Follow the color path — focus red gaps, then amber, then maintain green'}
+              ? 'Exam is close: start with the topics where you missed the most questions.'
+              : 'Your quiz results by topic, and what to practice next.'}
           </p>
         </div>
         <div className="ep-header-right">
@@ -170,7 +174,7 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
               </>
             )}
           </div>
-          <span className={`ep-readiness-pill ${pill.cls}`}>{pill.label}</span>
+          {hasData && <span className={`ep-readiness-pill ${pill.cls}`}>{pill.label}</span>}
         </div>
       </div>
 
@@ -181,13 +185,13 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
       {!hasData && (
         <div className="ep-empty-state">
           <div className="ep-empty-icon">📋</div>
-          <h3 className="ep-empty-title">No evidence found</h3>
+          <h3 className="ep-empty-title">No quiz results yet</h3>
           <p className="ep-empty-body">
-            Take a Reasoning Challenge first so readiness can be grounded in real practice attempts.
+            Take a quiz on your lecture material. Results here come only from questions you’ve actually answered.
           </p>
           {onGoToChallenge && (
             <button type="button" className="btn-primary mt-4 px-6 py-2.5 rounded-xl font-semibold" onClick={onGoToChallenge}>
-              Start a Challenge →
+              Take a quiz →
             </button>
           )}
         </div>
@@ -198,7 +202,12 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
         <div className="ep-body">
           {/* Left: score ring + weak areas */}
           <div className="ep-col-left">
-            <ReadinessScore score={readinessScore} />
+            <ReadinessScore
+              score={analytics.avgQuizScore}
+              quizCount={analytics.totalQuizzes}
+              isEarly={analytics.isEarlyResult}
+              unanswered={analytics.totalUnanswered}
+            />
             <WeakAreas
               onSelectTopic={(topic) => {
                 setFocusTopic(topic);

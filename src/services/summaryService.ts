@@ -17,6 +17,20 @@ import type {
 } from '../types/summary';
 
 import { AI_ENDPOINT as CLAUDE_URL, aiFetch } from './aiClient';
+import {
+  ADMIN_ONLY_MESSAGE,
+  AdministrativeOnlyError,
+  COURSE_POLICY_TOPIC_PREFIX,
+  MIN_ACADEMIC_CHARS,
+  academicOnlySummary,
+  buildSummaryView,
+  classifyDocumentText,
+  classifyPassage,
+  isAdministrativeLabel,
+  isAdministrativeTopic,
+  plainCoverageNote,
+} from './contentClassification';
+import type { CourseInfoItem } from '../types/summary';
 const TARGET_CHUNK_CHARS = 5500;
 const MAX_RETRIES = 2;
 
@@ -305,6 +319,18 @@ function extractiveChunkSummary(
     { length: chunk.endPage - chunk.startPage + 1 },
     (_, i) => chunk.startPage + i
   );
+  const pageLabel = chunk.startPage === chunk.endPage ? `Page ${chunk.startPage} was` : `Pages ${chunk.startPage}–${chunk.endPage} were`;
+  const fallbackNote = `${pageLabel} summarized straight from the extracted text because the AI service didn’t respond. Generate the summary again for fuller explanations.`;
+
+  // Logistics-only text becomes course information, never a study topic.
+  if (isAdministrativeLabel(title) || classifyPassage(plain) === 'administrative') {
+    return {
+      topics: [],
+      courseInfo: [{ title, details: sentences.slice(0, 5), sourcePages: pages }],
+      keyConcepts: [],
+      coverageNotes: [fallbackNote],
+    };
+  }
 
   return {
     topics: [
@@ -323,10 +349,8 @@ function extractiveChunkSummary(
         sourcePages: pages,
       },
     ],
-    keyConcepts: sentences
-      .flatMap((s) => s.split(/[^A-Za-z0-9-]+/))
-      .filter((w) => w.length > 5)
-      .slice(0, 6),
+    // Single words pulled from sentences are not concepts; leave the chips empty.
+    keyConcepts: [],
     definitionsAndFormulas: [],
     takeaways: sentences.slice(0, 3),
     examRevisionNotes: sentences.slice(0, 2),
@@ -336,10 +360,49 @@ function extractiveChunkSummary(
       claim,
       page: chunk.startPage,
     })),
-    coverageNotes: [
-      'Claude was unavailable for this chunk; showing extractive notes from the PDF text only.',
-    ],
+    coverageNotes: [fallbackNote],
   };
+}
+
+/** Move any administrative topics the model returned into course information. */
+function separateCourseInfo<T extends Partial<StructuredSummary> & { topics: TopicSummary[] }>(part: T): T {
+  const academic: TopicSummary[] = [];
+  const info: CourseInfoItem[] = [...(part.courseInfo || [])];
+  for (const t of part.topics || []) {
+    if (isAdministrativeTopic(t)) {
+      info.push({
+        title: t.title,
+        details: [t.explanation, ...(t.procedures || [])].filter((d) => d && d.trim()).slice(0, 6),
+        sourcePages: t.sourcePages || [],
+      });
+    } else {
+      academic.push({ ...t, category: 'academic' });
+    }
+  }
+  return {
+    ...part,
+    topics: academic,
+    courseInfo: info,
+    keyConcepts: (part.keyConcepts || []).filter((k) => !isAdministrativeLabel(k)),
+    topicsToReview: (part.topicsToReview || []).filter((k) => !isAdministrativeLabel(k)),
+  };
+}
+
+function normalizeCourseInfo(raw: unknown): CourseInfoItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+    .map((c) => ({
+      title: String(c.title || 'Course information'),
+      details: Array.isArray(c.details)
+        ? (c.details as unknown[]).map(String).filter(Boolean)
+        : c.details
+          ? [String(c.details)]
+          : [],
+      sourcePages: Array.isArray(c.sourcePages)
+        ? (c.sourcePages as unknown[]).map(Number).filter((n) => !Number.isNaN(n))
+        : [],
+    }));
 }
 
 function detectHeading(text: string): string | undefined {
@@ -431,10 +494,17 @@ Mode: ${mode}
 ${modeInstructions(mode)}
 
 RULES:
-- Use ONLY information from the chunk text below. Do NOT invent concepts, formulas, or page numbers.
+- Use ONLY information from the text below. Do NOT invent concepts, formulas, or page numbers.
 - Include real page numbers from [Page N] markers. NEVER invent page numbers.
 - Prefer concrete definitions, procedures, and examples that appear in the text.
-- If the chunk is mostly titles/headers, summarize what the section is about without fabricating details.
+- If the text is mostly titles/headers, summarize what it is about without fabricating details.
+- SEPARATE learning content from course administration:
+  * "topics", "keyConcepts", "definitionsAndFormulas", "takeaways", "examRevisionNotes" and "topicsToReview" contain ONLY subject matter a student would learn or practice (theories, methods, definitions, worked examples).
+  * Deadlines, due dates, grading breakdowns, late or submission policies, attendance, participation rules, office hours, contact details, communication channels, academic integrity, textbooks, prerequisites and course schedules go ONLY in "courseInfo".
+  * A week-by-week schedule that only lists topic names is course information, not academic content.
+  * If the text is only course administration, return "topics": [] and put everything in "courseInfo". Never invent academic content to fill topics.
+- "keyConcepts": at most 6 short concept names that the text actually explains.
+- "coverageNotes": only when something is genuinely missing, described plainly by page (e.g. "Page 4 is a diagram with no readable text"). Never mention chunks, boundaries or internal processing.
 - Return ONLY valid JSON.
 
 Chunk text:
@@ -462,18 +532,21 @@ JSON schema:
   "conceptRelationships": [{"from":"","to":"","relationship":""}],
   "topicsToReview": ["string"],
   "sourceReferences": [{"claim":"","page":1}],
-  "coverageNotes": ["string"]
+  "coverageNotes": ["string"],
+  "courseInfo": [{"title":"e.g. Late submission policy","details":["fact stated in the text"],"sourcePages":[1]}]
 }`;
 
   try {
     const text = await callClaude(prompt, 4096, 'Return ONLY valid JSON. No markdown. Never invent facts.');
     const parsed = safeParseJson<Record<string, any>>(text);
     const topics = Array.isArray(parsed.topics) ? parsed.topics : [];
-    if (!topics.length && !(parsed.takeaways?.length)) {
+    const courseInfo = normalizeCourseInfo(parsed.courseInfo);
+    if (!topics.length && !(parsed.takeaways?.length) && !courseInfo.length) {
       return extractiveChunkSummary(chunk);
     }
-    return {
+    return separateCourseInfo({
       topics,
+      courseInfo,
       keyConcepts: parsed.keyConcepts ?? [],
       definitionsAndFormulas: parsed.definitionsAndFormulas ?? [],
       takeaways: parsed.takeaways ?? [],
@@ -481,8 +554,8 @@ JSON schema:
       conceptRelationships: parsed.conceptRelationships ?? [],
       topicsToReview: parsed.topicsToReview ?? [],
       sourceReferences: parsed.sourceReferences ?? [],
-      coverageNotes: parsed.coverageNotes ?? [],
-    };
+      coverageNotes: (parsed.coverageNotes ?? []).map(plainCoverageNote),
+    });
   } catch (err) {
     console.warn(`[Summary] Claude chunk failed, using extractive fallback for ${chunk.id}`, err);
     return extractiveChunkSummary(chunk);
@@ -495,6 +568,7 @@ function mergePartial(
 ): StructuredSummary {
   const merged = EMPTY_SUMMARY();
   merged.unscannedPages = unscannedPages;
+  const courseInfo: CourseInfoItem[] = [];
 
   const topicMap = new Map<string, TopicSummary>();
 
@@ -533,7 +607,9 @@ function mergePartial(
     merged.topicsToReview.push(...(part.topicsToReview || []));
     merged.sourceReferences.push(...(part.sourceReferences || []));
     merged.coverageNotes.push(...(part.coverageNotes || []));
+    courseInfo.push(...(part.courseInfo || []));
   }
+  merged.courseInfo = courseInfo;
 
   merged.topics = [...topicMap.values()];
   merged.keyConcepts = [...new Set(merged.keyConcepts)];
@@ -541,15 +617,19 @@ function mergePartial(
   merged.examRevisionNotes = [...new Set(merged.examRevisionNotes)];
   merged.topicsToReview = [...new Set(merged.topicsToReview)];
   merged.overview = merged.topics.length
-    ? `This document covers ${merged.topics.length} major topic(s): ${merged.topics
+    ? `This material covers ${merged.topics
         .slice(0, 8)
         .map((t) => t.title)
         .join(', ')}${merged.topics.length > 8 ? ', and more' : ''}.`
-    : 'Summary generated from the uploaded material.';
+    : courseInfo.length
+      ? ADMIN_ONLY_MESSAGE
+      : 'No study content could be read from this material.';
+  merged.documentKind = merged.topics.length ? (courseInfo.length ? 'mixed' : 'academic') : 'administrative';
+  merged.coverageNotes = [...new Set(merged.coverageNotes.map(plainCoverageNote))];
 
   if (unscannedPages.length) {
     merged.coverageNotes.push(
-      `Pages with little or no extractable text (possibly scanned images): ${unscannedPages.join(', ')}. Visual diagrams on those pages were not analyzed.`
+      `Page${unscannedPages.length === 1 ? '' : 's'} ${unscannedPages.join(', ')} ha${unscannedPages.length === 1 ? 's' : 've'} little or no readable text (possibly a scan or diagram), so ${unscannedPages.length === 1 ? 'it isn’t' : 'they aren’t'} included in this summary.`
     );
   }
 
@@ -561,6 +641,9 @@ async function refineMergedSummary(
   mode: SummaryMode,
   fileName: string
 ): Promise<StructuredSummary> {
+  // Nothing academic to merge: don't ask the model to write a study summary.
+  if (draft.topics.length === 0) return draft;
+
   const compact = {
     topics: draft.topics.map((t) => ({
       title: t.title,
@@ -587,7 +670,9 @@ ${JSON.stringify(compact).slice(0, 28000)}
 
 Return ONLY valid JSON with this schema:
 {
-  "overview": "clear introduction of what the document covers",
+  "overview": "1-2 sentences on what this material teaches (subject matter only, no logistics)",
+  "whatItTeaches": "the same idea written to the student, e.g. 'This lecture explains ...'",
+  "practiceNext": ["2-4 concrete practice actions tied to specific topics and pages in the draft, e.g. 'Rework the example on page 3 without notes, then compare.'"],
   "topics": [{
     "title":"", "explanation":"", "subtopics":[], "definitions":[], "formulas":[],
     "procedures":[], "examples":[], "relationships":[], "sourcePages":[]
@@ -607,17 +692,30 @@ Rules:
 - Preserve real source page numbers only; never invent pages.
 - Keep ALL major topics represented; do not invent topics, formulas, or claims absent from the draft.
 - Organize by document structure.
-- Overview must describe the draft content only.`;
+- Overview must describe the draft content only.
+- "keyConcepts": at most 8 core academic concepts, not a long list of terms.
+- Leave course administration (deadlines, grading, attendance, submission or communication policies) out of every field; it is handled separately.
+- Never mention chunks, drafts or internal processing in any field.`;
 
   try {
     const text = await callClaude(prompt, 8192, 'Return ONLY valid JSON.');
     const parsed = safeParseJson<StructuredSummary>(text);
-    return {
+    const refined = separateCourseInfo({
       ...EMPTY_SUMMARY(),
       ...parsed,
+      topics: Array.isArray(parsed.topics) ? parsed.topics : [],
+      courseInfo: [],
       unscannedPages: draft.unscannedPages,
-      coverageNotes: [...new Set([...(parsed.coverageNotes || []), ...draft.coverageNotes])],
-    };
+      coverageNotes: [
+        ...new Set([...(parsed.coverageNotes || []), ...draft.coverageNotes].map(plainCoverageNote)),
+      ],
+    });
+    const courseInfo = [...(draft.courseInfo || []), ...(refined.courseInfo || [])];
+    if (!refined.topics.length) {
+      // The merge step dropped every topic; keep the grounded draft instead.
+      return { ...draft, courseInfo };
+    }
+    return { ...refined, courseInfo, documentKind: courseInfo.length ? 'mixed' : 'academic' };
   } catch (err) {
     console.warn('[Summary] Refine merge failed; using draft merge.', err);
     return draft;
@@ -652,7 +750,7 @@ export async function generateDocumentSummary(
     stage: 'chunking',
     current: 0,
     total: chunks.length,
-    message: `Split into ${chunks.length} chunk(s) across ${pages.length} page(s)`,
+    message: `Reading ${pages.length} page${pages.length === 1 ? '' : 's'}…`,
   });
 
   const parts: Array<Partial<StructuredSummary> & { topics: TopicSummary[] }> = [];
@@ -665,7 +763,10 @@ export async function generateDocumentSummary(
       stage: 'summarizing',
       current: i + 1,
       total: chunks.length,
-      message: `Summarizing pages ${chunk.startPage}–${chunk.endPage} (${i + 1}/${chunks.length})`,
+      message:
+        chunk.startPage === chunk.endPage
+          ? `Summarizing page ${chunk.startPage}`
+          : `Summarizing pages ${chunk.startPage}–${chunk.endPage}`,
     });
 
     let success = false;
@@ -693,7 +794,7 @@ export async function generateDocumentSummary(
         stage: 'summarizing',
         current: i + 1,
         total: chunks.length,
-        message: `Used extractive notes for pages ${chunk.startPage}–${chunk.endPage}`,
+        message: `Using the document text directly for pages ${chunk.startPage}–${chunk.endPage}`,
       });
     }
   }
@@ -708,7 +809,7 @@ export async function generateDocumentSummary(
     stage: 'merging',
     current: chunks.length,
     total: chunks.length,
-    message: 'Merging chunk summaries into a document-wide summary…',
+    message: 'Putting the summary together…',
   });
 
   const draft = mergePartial(parts, unscanned);
@@ -716,8 +817,11 @@ export async function generateDocumentSummary(
 
   const complete = pagesFailed.length === 0 && parts.length === chunks.length;
   if (!complete) {
+    const failed = [...new Set(pagesFailed)].sort((a, b) => a - b);
     refined.coverageNotes.push(
-      `Incomplete: ${pagesFailed.length} page(s) failed processing: ${[...new Set(pagesFailed)].join(', ') || 'none'}.`
+      failed.length
+        ? `Page${failed.length === 1 ? '' : 's'} ${failed.join(', ')} couldn’t be summarized by the AI service, so ${failed.length === 1 ? 'it shows' : 'they show'} text taken directly from the document.`
+        : 'Part of this document couldn’t be summarized. Generate the summary again to fill the gaps.'
     );
   }
 
@@ -725,8 +829,12 @@ export async function generateDocumentSummary(
     stage: 'done',
     current: chunks.length,
     total: chunks.length,
-    message: complete ? 'Summary complete' : 'Summary finished with gaps',
+    message: complete ? 'Summary ready' : 'Summary ready, with a few pages missing',
   });
+
+  const kind = buildSummaryView(refined).kind;
+  refined.documentKind = kind;
+  if (kind === 'administrative') refined.overview = ADMIN_ONLY_MESSAGE;
 
   return {
     summary: refined,
@@ -851,6 +959,10 @@ export async function extractConceptsFromSummary(
   summary: StructuredSummary,
   document: StudyDocument
 ): Promise<ConceptCard[]> {
+  summary = academicOnlySummary(summary);
+  // No academic topics: nothing to extract, and no reason to pay for a call.
+  if (summary.topics.length === 0) return [];
+
   const compactTopics = summary.topics.slice(0, 12).map((t) => ({
     title: t.title,
     explanation: (t.explanation || '').slice(0, 220),
@@ -882,7 +994,8 @@ No markdown. No trailing commas. Escape quotes inside strings.
   }
 ]
 
-Use only real page numbers from the input.`;
+Use only real page numbers from the input.
+Only include subject-matter concepts. Never include course logistics such as deadlines, grading, attendance or submission policies.`;
 
   try {
     const text = await callClaude(
@@ -891,8 +1004,8 @@ Use only real page numbers from the input.`;
       'Return ONLY a valid compact JSON array. Keep explanations short so the JSON is complete.'
     );
     const parsed = safeParseJson(text);
-    const cards = normalizeConceptCards(parsed);
-    if (cards.length > 0) return cards.slice(0, 12);
+    const cards = normalizeConceptCards(parsed).filter((c) => !isAdministrativeLabel(c.name));
+    if (cards.length > 0) return cards.slice(0, 10);
     return conceptsFromSummaryFallback(summary);
   } catch (err) {
     console.warn('[Summary] Concept extraction parse failed; using local fallback.', err);
@@ -905,16 +1018,19 @@ export async function generateFlashcardsFromMaterial(
   summary?: StructuredSummary | null,
   count = 12
 ): Promise<Flashcard[]> {
-  const pages = parsePagedText(document.rawText || '');
+  const classified = classifyDocumentText(document.rawText || '');
+  if (classified.academicChars < MIN_ACADEMIC_CHARS) throw new AdministrativeOnlyError();
+  const pages = parsePagedText(classified.academicText);
   const sample = pages
     .filter((p) => p.text.trim().length > 40)
     .slice(0, 20)
     .map((p) => `[Page ${p.page}] ${p.text.slice(0, 800)}`)
     .join('\n');
+  const academicTopics = summary ? buildSummaryView(summary).academicTopics.map((t) => t.title) : [];
 
   const prompt = `Generate ${count} study flashcards from this uploaded material.
 Document: ${document.fileName}
-${summary ? `Summary topics: ${summary.topics.map((t) => t.title).join(', ')}` : ''}
+${academicTopics.length ? `Summary topics: ${academicTopics.join(', ')}` : ''}
 
 Source excerpts:
 """
@@ -927,7 +1043,8 @@ Return ONLY JSON array:
 Rules:
 - Answers must be grounded in the source.
 - Include real sourcePage when possible; omit rather than invent.
-- Front must not reveal the answer.`;
+- Front must not reveal the answer.
+- Cover subject matter only; skip deadlines, grading, attendance and other course logistics.`;
 
   const text = await callClaude(prompt, 4096, 'Return ONLY a complete JSON array. Keep answers short.');
   const parsed = safeParseJson(text);
@@ -983,11 +1100,12 @@ function isGoodPracticeItem(q: PracticeItem): boolean {
 }
 
 async function groundedPracticeFallback(
-  document: StudyDocument,
-  count: number
+  sourceText: string,
+  count: number,
+  topicPrefix?: string
 ): Promise<PracticeItem[]> {
   const { generateFallbackQuiz } = await import('./quizService');
-  const raw = await generateFallbackQuiz(document.rawText || '', count);
+  const raw = await generateFallbackQuiz(sourceText, count);
   return raw.map((q) => ({
     id: q.id,
     type: 'multiple_choice',
@@ -995,7 +1113,7 @@ async function groundedPracticeFallback(
     options: q.options,
     correctAnswer: q.correctAnswer,
     explanation: q.explanation || 'Grounded in your uploaded notes.',
-    sourceTopic: q.sourceTopic || 'Content review',
+    sourceTopic: topicPrefix ? `${topicPrefix} · ${q.sourceTopic || 'General'}` : q.sourceTopic || 'Content review',
   }));
 }
 
@@ -1006,9 +1124,21 @@ export async function generatePracticeFromDocument(
     difficulty?: 'easy' | 'medium' | 'hard';
     count?: number;
     types?: string[];
+    /** 'academic' (default) skips course logistics; 'course_policies' quizzes only on them. */
+    focus?: 'academic' | 'course_policies';
   }
 ): Promise<PracticeItem[]> {
-  const pages = parsePagedText(document.rawText || '');
+  const focus = opts.focus ?? 'academic';
+  const classified = classifyDocumentText(document.rawText || '');
+  if (focus === 'academic' && classified.academicChars < MIN_ACADEMIC_CHARS) {
+    throw new AdministrativeOnlyError();
+  }
+  if (focus === 'course_policies' && !classified.administrativeText.trim()) {
+    throw new Error('No course policies were found in this material.');
+  }
+  const sourceText = focus === 'academic' ? classified.academicText : classified.administrativeText;
+  const topicPrefix = focus === 'course_policies' ? COURSE_POLICY_TOPIC_PREFIX : undefined;
+  const pages = parsePagedText(sourceText);
   const sample = pages
     .filter((p) => p.text.trim().length > 40)
     .slice(0, 25)
@@ -1030,8 +1160,13 @@ export async function generatePracticeFromDocument(
   const topics = opts.topics?.length ? opts.topics.join(', ') : 'all major topics in the material';
 
   if (sample.replace(/\s+/g, ' ').trim().length < 80) {
-    return groundedPracticeFallback(document, count);
+    return groundedPracticeFallback(sourceText, count, topicPrefix);
   }
+
+  const focusRule =
+    focus === 'course_policies'
+      ? '- These excerpts are course policies and logistics. Ask about the stated rules only. Each sourceTopic is the policy name (e.g. "Late submission").'
+      : '- Ask only about subject matter. Never ask about deadlines, grading, attendance, submission or communication policies.';
 
   const prompt = `Generate a practice exam STRICTLY from the student's uploaded study material.
 Document: ${document.fileName}
@@ -1063,7 +1198,8 @@ Hard rules:
 - For multiple_choice: exactly 4 DISTINCT plausible options about the content. NEVER use "Is a correct statement", "Is a false statement", "Is not mentioned", or "Is partially true".
 - Never invent formulas, names, or procedures that are not in the excerpts.
 - Never claim these are real exam questions.
-- Use real sourcePage when possible.`;
+- Use real sourcePage when possible.
+${focusRule}`;
 
   try {
     const text = await callClaude(
@@ -1076,7 +1212,7 @@ Hard rules:
       ? parsed
       : (parsed as { questions?: unknown[] })?.questions || [];
     if (!Array.isArray(list)) {
-      return groundedPracticeFallback(document, count);
+      return groundedPracticeFallback(sourceText, count, topicPrefix);
     }
 
     const accepted = (list as PracticeItem[])
@@ -1087,17 +1223,18 @@ Hard rules:
         explanation: q.explanation || '',
         correctAnswer: String(q.correctAnswer ?? ''),
         question: String(q.question ?? ''),
+        sourceTopic: topicPrefix ? `${topicPrefix} · ${q.sourceTopic || 'General'}` : q.sourceTopic,
       }))
       .filter(isGoodPracticeItem);
 
     if (accepted.length < count) {
-      const topUp = await groundedPracticeFallback(document, count - accepted.length);
+      const topUp = await groundedPracticeFallback(sourceText, count - accepted.length, topicPrefix);
       return [...accepted, ...topUp].slice(0, count);
     }
     return accepted.slice(0, count);
   } catch (err) {
     console.warn('[Practice] Claude generation failed, using grounded fallback', err);
-    return groundedPracticeFallback(document, count);
+    return groundedPracticeFallback(sourceText, count, topicPrefix);
   }
 }
 
@@ -1106,47 +1243,49 @@ export function summaryToMarkdown(
   mode: SummaryMode,
   summary: StructuredSummary
 ): string {
-  const lines: string[] = [
-    `# Summary: ${fileName}`,
-    `Mode: ${mode}`,
-    '',
-    '## 1. Overview',
-    summary.overview,
-    '',
-    '## 2. Topic-by-Topic Summary',
-  ];
+  const view = buildSummaryView(summary);
+  const lines: string[] = [`# Summary: ${fileName}`, `Mode: ${mode}`, '', '## What this material teaches', view.overview, ''];
 
-  for (const t of summary.topics) {
-    lines.push(`### ${t.title}`);
-    lines.push(t.explanation);
-    if (t.subtopics?.length) lines.push(`Subtopics: ${t.subtopics.join('; ')}`);
-    if (t.definitions?.length) lines.push(`Definitions: ${t.definitions.join('; ')}`);
-    if (t.formulas?.length) lines.push(`Formulas: ${t.formulas.join('; ')}`);
-    if (t.procedures?.length) lines.push(`Procedures: ${t.procedures.join('; ')}`);
-    if (t.examples?.length) lines.push(`Examples: ${t.examples.join('; ')}`);
-    if (t.sourcePages?.length) lines.push(`Source: Page ${t.sourcePages.join(', ')}`);
+  if (view.academicTopics.length) {
+    lines.push('## Core concepts and explanations');
+    for (const t of view.academicTopics) {
+      lines.push(`### ${t.title}`);
+      lines.push(t.explanation);
+      if (t.subtopics?.length) lines.push(`Subtopics: ${t.subtopics.join('; ')}`);
+      if (t.definitions?.length) lines.push(`Definitions: ${t.definitions.join('; ')}`);
+      if (t.formulas?.length) lines.push(`Formulas: ${t.formulas.join('; ')}`);
+      if (t.procedures?.length) lines.push(`Procedures: ${t.procedures.join('; ')}`);
+      if (t.examples?.length) lines.push(`Examples: ${t.examples.join('; ')}`);
+      if (t.sourcePages?.length) lines.push(`Source: Page ${t.sourcePages.join(', ')}`);
+      lines.push('');
+    }
+  }
+  if (view.definitionsAndFormulas.length) {
+    lines.push('## Definitions and formulas');
+    for (const d of view.definitionsAndFormulas) {
+      lines.push(
+        `- **${d.term}**: ${d.definition}${d.formula ? ` | Formula: ${d.formula}` : ''}${d.sourcePages?.length ? ` (p. ${d.sourcePages.join(', ')})` : ''}`
+      );
+    }
     lines.push('');
   }
-
-  lines.push('## 3. Key Concepts', ...summary.keyConcepts.map((c) => `- ${c}`), '');
-  lines.push('## 4. Definitions and Formulas');
-  for (const d of summary.definitionsAndFormulas) {
-    lines.push(`- **${d.term}**: ${d.definition}${d.formula ? ` | Formula: ${d.formula}` : ''}${d.sourcePages?.length ? ` (p. ${d.sourcePages.join(', ')})` : ''}`);
+  if (view.takeaways.length) lines.push('## Key takeaways', ...view.takeaways.map((t) => `- ${t}`), '');
+  if (view.practiceNext.length) lines.push('## What to practice next', ...view.practiceNext.map((t) => `- ${t}`), '');
+  if (view.examRevisionNotes.length) lines.push('## Exam revision notes', ...view.examRevisionNotes.map((t) => `- ${t}`), '');
+  if (view.courseInfo.length) {
+    lines.push('## Course information');
+    for (const c of view.courseInfo) {
+      lines.push(`### ${c.title}`, ...c.details.map((d) => `- ${d}`));
+      if (c.sourcePages.length) lines.push(`Source: Page ${c.sourcePages.join(', ')}`);
+      lines.push('');
+    }
   }
-  lines.push('', '## 5. Important Takeaways', ...summary.takeaways.map((t) => `- ${t}`));
-  lines.push('', '## 6. Exam Revision Notes', ...summary.examRevisionNotes.map((t) => `- ${t}`));
-  lines.push('', '## 7. Concept Relationships');
-  for (const r of summary.conceptRelationships) {
-    lines.push(`- ${r.from} → ${r.to}: ${r.relationship}`);
+  if (summary.sourceReferences?.length) {
+    lines.push('## Source references');
+    for (const s of summary.sourceReferences) lines.push(`- "${s.claim}" — Source: Page ${s.page}`);
+    lines.push('');
   }
-  lines.push('', '## 8. Topics to Review', ...summary.topicsToReview.map((t) => `- ${t}`));
-  lines.push('', '## 9. Source References');
-  for (const s of summary.sourceReferences) {
-    lines.push(`- "${s.claim}" — Source: Page ${s.page}`);
-  }
-  if (summary.coverageNotes.length) {
-    lines.push('', '## Coverage Notes', ...summary.coverageNotes.map((n) => `- ${n}`));
-  }
+  if (view.coverageNotes.length) lines.push('## Notes on coverage', ...view.coverageNotes.map((n) => `- ${n}`));
   return lines.join('\n');
 }
 

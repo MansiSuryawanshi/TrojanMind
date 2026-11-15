@@ -41,6 +41,15 @@ export interface TopicSummary {
   examples: string[];
   relationships: string[];
   sourcePages: number[];
+  /** 'course_info' = deadlines, grading, attendance, policies. Absent on older summaries. */
+  category?: 'academic' | 'course_info';
+}
+
+/** Course logistics kept out of academic practice (deadlines, grading, policies). */
+export interface CourseInfoItem {
+  title: string;
+  details: string[];
+  sourcePages: number[];
 }
 
 export interface StructuredSummary {
@@ -55,6 +64,13 @@ export interface StructuredSummary {
   sourceReferences: { claim: string; page: number }[];
   coverageNotes: string[];
   unscannedPages: number[];
+  /** Added with content classification; absent on older saved summaries. */
+  documentKind?: 'academic' | 'administrative' | 'mixed';
+  courseInfo?: CourseInfoItem[];
+  /** One or two sentences on what the material teaches. */
+  whatItTeaches?: string;
+  /** Concrete next practice steps grounded in the source. */
+  practiceNext?: string[];
 }
 
 export interface SummaryRecord {

@@ -1,16 +1,20 @@
 /**
- * ReadinessScore – large animated number showing 0–100 overall exam readiness.
- * Updates visibly whenever the student passes/fails a cross-examination.
+ * ReadinessScore – animated ring showing the average recorded quiz score.
+ * It reports practice results only; it is not a measure of overall understanding.
  * Owner: Developer 3 (Exam Prep)
  */
 import React, { useEffect, useRef, useState } from 'react';
 
 interface Props {
+  /** Average quiz score in percent (genuine zeros included). */
   score: number;
   previousScore?: number;
+  quizCount?: number;
+  isEarly?: boolean;
+  unanswered?: number;
 }
 
-export const ReadinessScore: React.FC<Props> = ({ score, previousScore }) => {
+export const ReadinessScore: React.FC<Props> = ({ score, previousScore, quizCount = 0, isEarly = false, unanswered = 0 }) => {
   const [displayScore, setDisplayScore] = useState(previousScore ?? score);
   const [isAnimating, setIsAnimating] = useState(false);
   const [delta, setDelta] = useState(0);
@@ -64,10 +68,10 @@ export const ReadinessScore: React.FC<Props> = ({ score, previousScore }) => {
 
   return (
     <div className="readiness-score-card">
-      <p className="readiness-label">Exam Readiness</p>
+      <p className="readiness-label">{isEarly ? 'Early practice results' : 'Average quiz score'}</p>
 
       <div className="readiness-ring-wrap">
-        <svg width="140" height="140" viewBox="0 0 140 140" role="img" aria-label={`Exam readiness ${displayScore} out of 100`}>
+        <svg width="140" height="140" viewBox="0 0 140 140" role="img" aria-label={`Average quiz score ${displayScore} percent`}>
           {/* track */}
           <circle cx="70" cy="70" r={r} fill="none" stroke="var(--color-sunken)" strokeWidth="10" />
           {/* progress arc */}
@@ -96,9 +100,15 @@ export const ReadinessScore: React.FC<Props> = ({ score, previousScore }) => {
           >
             {displayScore}
           </span>
-          <span className="readiness-out-of">/100</span>
+          <span className="readiness-out-of">%</span>
         </div>
       </div>
+
+      <p className="text-xs text-muted text-center mt-2 leading-snug">
+        Average quiz score across {quizCount} quiz{quizCount === 1 ? '' : 'zes'}
+        {unanswered > 0 ? ` · ${unanswered} question${unanswered === 1 ? '' : 's'} left unanswered` : ''}.
+        {isEarly ? ' More practice is needed to see a reliable trend.' : ' It reflects practice quizzes, not overall understanding.'}
+      </p>
 
       {/* delta chip – appears briefly after a verdict */}
       {isAnimating && delta !== 0 && (

@@ -96,12 +96,15 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
           <AssignmentNotifications />
           <BrightspacePill status={bs} onClick={() => go(HOME_TABS.courses)} />
 
+          {/* Quick way back to saved work. Hidden on wide screens, where the
+              same link already sits in the main nav. */}
           <button
             type="button"
-            onClick={() => go(HOME_TABS.courses)}
-            className="btn-primary px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap"
+            onClick={() => go(HOME_TABS.materials)}
+            aria-current={activeTab === HOME_TABS.materials ? 'page' : undefined}
+            className="xl:hidden btn-primary px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap"
           >
-            Get Started
+            My Materials
           </button>
 
           <button

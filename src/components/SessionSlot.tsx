@@ -16,6 +16,7 @@ interface SessionSlotProps {
   studySteps?: string[];
   resources?: StudyResource[];
   isLast?: boolean;
+  onDurationChange?: (minutes: number) => void;
 }
 
 const BADGE_CLASSES: Record<BadgeType, string> = {
@@ -34,7 +35,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   article: 'Article',
   video: 'Video',
   docs: 'Docs',
-  uploaded_material: 'Your upload',
+  uploaded_material: 'Your material',
   practice: 'Practice',
   other: 'Resource',
 };
@@ -50,7 +51,9 @@ export const SessionSlot: React.FC<SessionSlotProps> = ({
   studySteps,
   resources,
   isLast = false,
+  onDurationChange,
 }) => {
+  const minutes = Number.parseInt(duration, 10);
   const [expanded, setExpanded] = useState(true);
   const hasDetail =
     Boolean(whatToStudy?.trim()) ||
@@ -88,9 +91,27 @@ export const SessionSlot: React.FC<SessionSlotProps> = ({
           <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${BADGE_CLASSES[badgeType]}`}>
             {BADGE_LABELS[badgeType]}
           </span>
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-sunken text-muted">
-            {duration}
-          </span>
+          {onDurationChange && Number.isFinite(minutes) ? (
+            <label className="text-[11px] px-2 py-0.5 rounded-full bg-sunken text-muted inline-flex items-center gap-1">
+              Est.
+              <input
+                type="number"
+                min={5}
+                max={240}
+                step={5}
+                defaultValue={minutes}
+                onBlur={(e) => {
+                  const v = Math.max(5, Math.min(240, Number(e.target.value) || minutes));
+                  if (v !== minutes) onDurationChange(v);
+                }}
+                className="w-11 bg-transparent text-ink text-[11px] tabular-nums focus:outline-none"
+                aria-label={`Estimated minutes for ${label}`}
+              />
+              min
+            </label>
+          ) : (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-sunken text-muted">Est. {duration}</span>
+          )}
           {hasDetail && (
             <button
               type="button"
@@ -134,6 +155,9 @@ export const SessionSlot: React.FC<SessionSlotProps> = ({
             <div>
               <p className="text-[10px] font-bold uppercase tracking-wider text-cardinal mb-1.5">
                 Where to study from
+              </p>
+              <p className="text-[11px] text-muted mb-1.5">
+                “Your material” is text you imported into TrojanMind. Links open external pages and aren’t imported.
               </p>
               <ul className="space-y-2">
                 {resources.map((r, i) => (

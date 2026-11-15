@@ -8,6 +8,7 @@ import { useStore } from '../store/store';
 import type { TopicProgress } from '../types';
 import { saveRevisionTask } from '../services/firebaseService';
 import { suggestSchedulePlacement } from '../services/scheduleSuggest';
+import { deriveStudentAnalytics, topicEvidence } from '../services/analyticsService';
 
 export type PathBand = 'weak' | 'moderate' | 'strong';
 
@@ -60,7 +61,10 @@ function bandMeta(band: PathBand) {
   };
 }
 
-function buildPath(topics: TopicProgress[]): PathStep[] {
+function buildPath(allTopics: TopicProgress[]): PathStep[] {
+  // Only topics with answered questions; untested topics aren't scored as 0%.
+  const topics = allTopics
+    .filter((t): t is TopicProgress & { percentage: number } => t.percentage != null);
   const sorted = [...topics].sort((a, b) => a.percentage - b.percentage);
   const weak = sorted.filter((t) => bandFor(t.percentage) === 'weak').slice(0, 3);
   const moderate = sorted.filter((t) => bandFor(t.percentage) === 'moderate').slice(0, 2);
@@ -77,8 +81,8 @@ function buildPath(topics: TopicProgress[]): PathStep[] {
       title: i === 0 ? `Start here: ${t.name}` : `Next red gap: ${t.name}`,
       why:
         i === 0
-          ? `This is your weakest signal (${t.percentage}%). Spend a full session explaining it out loud, then defend it in Cross-Examination.`
-          : `Still red at ${t.percentage}%. Only after the previous red feels clearer — cross-examine, then check Topic Coverage again.`,
+          ? `${topicEvidence(t)}. Re-read this topic in your notes, explain it out loud, then answer a follow-up question on it.`
+          : `${topicEvidence(t)}. Work on it once the previous topic feels clearer.`,
       actions: [
         { id: 'cx', label: 'Cross-examine this', kind: 'cross_exam' },
         { id: 'sch', label: 'Add to study plan', kind: 'schedule' },
@@ -94,7 +98,7 @@ function buildPath(topics: TopicProgress[]): PathStep[] {
       topic: t.name,
       percentage: t.percentage,
       title: `Then strengthen: ${t.name}`,
-      why: `Amber at ${t.percentage}% — you know pieces of it. Run a short Challenge set, then one Cross-Examination to push it into green.`,
+      why: `${topicEvidence(t)}. You have parts of it; a short quiz and one follow-up question will show what’s still missing.`,
       actions: [
         { id: 'ch', label: 'Practice in Challenge', kind: 'challenge' },
         { id: 'cx', label: 'Cross-examine', kind: 'cross_exam' },
@@ -110,7 +114,7 @@ function buildPath(topics: TopicProgress[]): PathStep[] {
       topic: t.name,
       percentage: t.percentage,
       title: `Quick maintain: ${t.name}`,
-      why: `Green at ${t.percentage}%. Do a 5-minute recall only — then go back to any remaining red topics.`,
+      why: `${topicEvidence(t)}. A quick recall check is enough for now; spend more time on the topics above.`,
       actions: [
         { id: 'cx', label: 'Quick probe', kind: 'cross_exam' },
         { id: 'next', label: 'Back to gaps', kind: 'next' },
@@ -137,16 +141,16 @@ function coachBlurb(
         : 'Follow the color path: red → amber → green.';
 
   if (!current) {
-    return `You're caught up on the path. Keep readiness (${readiness}/100) climbing with light reviews.`;
+    return `You've worked through every topic on the path. Your average quiz score is ${readiness}%; keep taking short quizzes to confirm it.`;
   }
 
   if (current.band === 'weak') {
-    return `Coach: Focus on "${current.topic}" now (${current.percentage}% — red). ${urgency} Do not jump to green topics yet${reds > 1 ? ` — ${reds} red gaps still need attention` : ''}.`;
+    return `Start with "${current.topic}": ${current.percentage}% of answered questions correct. ${urgency}${reds > 1 ? ` ${reds} topics are in red.` : ''}`;
   }
   if (current.band === 'moderate') {
-    return `Coach: Reds are clearer — now push "${current.topic}" from amber (${current.percentage}%) toward green with practice + one defense.`;
+    return `Next, "${current.topic}" (${current.percentage}% of answered questions correct): a short quiz and one follow-up question.`;
   }
-  return `Coach: "${current.topic}" is already green. Quick maintain only, then loop back if any topic turns red again.`;
+  return `"${current.topic}" is scoring well (${current.percentage}%). A quick check is enough; go back to any red topics first.`;
 }
 
 export const ReadinessPathCoach: React.FC<Props> = ({
@@ -157,7 +161,9 @@ export const ReadinessPathCoach: React.FC<Props> = ({
   onGoToChallenge,
 }) => {
   const topics = useStore((s) => s.topicProgress);
-  const readiness = useStore((s) => s.readinessScore);
+  const attempts = useStore((s) => s.allAttempts);
+  // Plain average quiz score; cross-exam adjustments don't change recorded scores.
+  const readiness = useMemo(() => deriveStudentAnalytics(attempts).avgQuizScore, [attempts]);
   const daysLeft = useStore((s) => s.daysLeft);
   const examDate = useStore((s) => s.examDate);
   const revisionTasks = useStore((s) => s.revisionTasks);
@@ -228,6 +234,7 @@ export const ReadinessPathCoach: React.FC<Props> = ({
         revisionTasks,
         daysLeft,
         examDate,
+        fileName: summaryBridge.fileName,
       });
 
       // Prefer sequencing after the previous path step when available
@@ -253,7 +260,7 @@ export const ReadinessPathCoach: React.FC<Props> = ({
       addRevisionTaskLocal({ ...task, id, createdAt: null });
 
       setPlanMsg(
-        `Saved “${current.topic}” for ${suggestion.date} · ${suggestion.durationMinutes} min` +
+        `Saved “${current.topic}” for ${suggestion.date} (about ${suggestion.durationMinutes} min, adjustable)` +
           (afterTopic ? ` (after ${afterTopic})` : '')
       );
       setDoneIds((prev) => new Set(prev).add(current.id));
@@ -281,8 +288,8 @@ export const ReadinessPathCoach: React.FC<Props> = ({
   return (
     <div className="ep-card readiness-path-coach">
       <div className="ep-card-header">
-        <h3 className="ep-card-title">Your connected study path</h3>
-        <span className="ep-card-subtitle">Red → amber → green</span>
+        <h3 className="ep-card-title">What to practice next</h3>
+        <span className="ep-card-subtitle">Lowest quiz results first</span>
       </div>
 
       <p className="path-coach-blurb" role="status">

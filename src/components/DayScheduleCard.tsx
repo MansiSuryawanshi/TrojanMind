@@ -7,6 +7,8 @@ import { SessionSlot } from './SessionSlot';
 
 interface DayScheduleCardProps {
   day: DaySchedule;
+  /** Called when the student edits a session's estimated minutes. */
+  onDurationChange?: (sessionIndex: number, minutes: number) => void;
 }
 
 function formatPrettyDate(iso?: string): string | null {
@@ -21,7 +23,7 @@ function formatPrettyDate(iso?: string): string | null {
   });
 }
 
-export const DayScheduleCard: React.FC<DayScheduleCardProps> = ({ day }) => {
+export const DayScheduleCard: React.FC<DayScheduleCardProps> = ({ day, onDurationChange }) => {
   const [collapsed, setCollapsed] = useState(false);
   const pretty = formatPrettyDate(day.date);
 
@@ -72,6 +74,7 @@ export const DayScheduleCard: React.FC<DayScheduleCardProps> = ({ day }) => {
               studySteps={session.study_steps}
               resources={session.resources}
               isLast={i === day.sessions.length - 1}
+              onDurationChange={onDurationChange ? (m) => onDurationChange(i, m) : undefined}
             />
           ))}
         </div>

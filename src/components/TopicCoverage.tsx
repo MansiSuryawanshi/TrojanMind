@@ -46,7 +46,18 @@ export const TopicCoverage: React.FC<Props> = ({ focusTopic = null, onSelectTopi
 
       <div className="topic-list">
         {topics.map((topic: TopicProgress, idx: number) => {
-          const badge = getBadge(topic.percentage);
+          if (topic.percentage == null) {
+            return (
+              <div key={idx} className="topic-row">
+                <div className="topic-meta">
+                  <span className="topic-name">{topic.name}</span>
+                  <span className="topic-badge">Not assessed</span>
+                </div>
+              </div>
+            );
+          }
+          const pct = topic.percentage;
+          const badge = getBadge(pct);
           const active = focusTopic === topic.name;
           return (
             <button
@@ -66,17 +77,17 @@ export const TopicCoverage: React.FC<Props> = ({ focusTopic = null, onSelectTopi
                   <div
                     className="topic-bar-fill"
                     style={{
-                      width: mounted ? `${topic.percentage}%` : '0%',
-                      backgroundColor: getBarColor(topic.percentage),
+                      width: mounted ? `${pct}%` : '0%',
+                      backgroundColor: getBarColor(pct),
                       transitionDelay: `${idx * 80}ms`,
                     }}
                   />
                 </div>
                 <span
                   className="topic-pct"
-                  style={{ color: getBarColor(topic.percentage) }}
+                  style={{ color: getBarColor(pct) }}
                 >
-                  {topic.percentage}%
+                  {pct}%
                 </span>
               </div>
             </button>
