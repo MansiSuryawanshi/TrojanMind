@@ -1,3 +1,3 @@
 
-export const ANTHROPIC_MODEL = "claude-3-5-sonnet-20240620";
-export const ANTHROPIC_FALLBACK_MODEL = "claude-3-haiku-20240307";
+export const ANTHROPIC_MODEL = "claude-sonnet-5-5";
+export const ANTHROPIC_FALLBACK_MODEL = "claude-haiku-5-5";

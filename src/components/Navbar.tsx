@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, LogOut, Menu, X } from 'lucide-react';
 import { useAuth } from '../auth/useAuth';
 import { useBrightspace } from '../brightspace/useBrightspace';
+import { HOME_TABS } from './homeTabs';
 
 interface NavbarProps {
   activeTab: number;
@@ -12,15 +13,16 @@ interface NavbarProps {
 // add material, reached from My Courses, the homepage, and the Challenge page.
 // While on it, "My Courses" stays highlighted as the materials section.
 const navItems = [
-  { label: 'Home', index: 0 },
-  { label: 'My Courses', index: 6, alsoActiveFor: [1] },
-  { label: 'Challenge', index: 2 },
-  { label: 'Exam Prep', index: 3 },
-  { label: 'Study Schedule', index: 4 },
-  { label: 'Study Report', index: 5 },
+  { label: 'Home', index: HOME_TABS.home },
+  { label: 'My Courses', index: HOME_TABS.courses, alsoActiveFor: [HOME_TABS.upload] },
+  { label: 'Summary', index: HOME_TABS.summary },
+  { label: 'Challenge', index: HOME_TABS.challenge },
+  { label: 'Exam Prep', index: HOME_TABS.examPrep },
+  { label: 'Study Schedule', index: HOME_TABS.schedule },
+  { label: 'Study Report', index: HOME_TABS.report },
 ];
 
-const isActive = (item: { index: number; alsoActiveFor?: number[] }, activeTab: number) =>
+const isActive = (item: { index: number; alsoActiveFor?: readonly number[] }, activeTab: number) =>
   activeTab === item.index || (item.alsoActiveFor?.includes(activeTab) ?? false);
 
 const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
@@ -52,7 +54,7 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
         {/* Brand */}
         <button
           type="button"
-          onClick={() => go(0)}
+          onClick={() => go(HOME_TABS.home)}
           className="flex items-center gap-3 cursor-pointer text-left"
           aria-label="TrojanMind home"
         >
@@ -89,11 +91,11 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
         </div>
 
         <div className="flex items-center gap-2">
-          <BrightspacePill status={bs} onClick={() => go(6)} />
+          <BrightspacePill status={bs} onClick={() => go(HOME_TABS.courses)} />
 
           <button
             type="button"
-            onClick={() => go(6)}
+            onClick={() => go(HOME_TABS.courses)}
             className="btn-primary px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap"
           >
             Get Started

@@ -37,6 +37,14 @@ export const db = getFirestore(app);
 /** True only when every Firebase env var is set (i.e. we are not on dummy keys). */
 export const isFirebaseConfigured = missingVars.length === 0;
 
+export function assertFirebaseConfigured(): void {
+  if (!isFirebaseConfigured) {
+    throw new Error(
+      "Firebase is not configured. Add the VITE_FIREBASE_* values to your .env file and restart the dev server."
+    );
+  }
+}
+
 /**
  * Firebase Authentication. In the browser, getAuth() defaults to local
  * (IndexedDB) persistence, so the signed-in session survives page reloads.

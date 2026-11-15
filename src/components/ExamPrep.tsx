@@ -3,6 +3,7 @@ import { ReadinessScore } from './ReadinessScore';
 import { TopicCoverage } from './TopicCoverage';
 import { WeakAreas } from './WeakAreas';
 import { CrossExamination } from './CrossExamination';
+import { MaterialPractice } from './MaterialPractice';
 import { useStore } from '../store/store';
 import { saveExamDate } from '../services/firebaseService';
 import { deriveStudentAnalytics, mapStatsToProgress } from '../services/analyticsService';
@@ -20,6 +21,7 @@ export const ExamPrep: React.FC = () => {
   const setDaysLeft = useStore((s) => s.setDaysLeft);
   const allAttempts = useStore((s) => s.allAttempts);
   const isInitialLoadComplete = useStore((s) => s.isInitialLoadComplete);
+  const summaryBridge = useStore((s) => s.summaryBridge);
 
   const [isLoading, setIsLoading] = useState(!isInitialLoadComplete);
   const [isEditingDate, setIsEditingDate] = useState(false);
@@ -100,8 +102,8 @@ export const ExamPrep: React.FC = () => {
           <h1 className="ep-title">Exam Readiness</h1>
           <p className="ep-subtitle">
             {daysLeft !== null && daysLeft <= 7 
-              ? "🕒 Critical window: Focus on highest impact topics." 
-              : "Track your preparation and close knowledge gaps"}
+              ? "Critical window: run the Exam Prep Arena on your weak topics." 
+              : "Track readiness, then enter the quiz arena to practice from your uploads"}
           </p>
         </div>
         <div className="ep-header-right">
@@ -150,7 +152,7 @@ export const ExamPrep: React.FC = () => {
           <div className="ep-empty-icon">📋</div>
           <h3 className="ep-empty-title">No evidence found</h3>
           <p className="ep-empty-body">
-            Take a Reasoning Challenge to ground your readiness score in real performance data.
+            Enter the Exam Prep Arena below (or take a Reasoning Challenge) to ground your readiness score in real practice.
           </p>
         </div>
       )}
@@ -171,6 +173,13 @@ export const ExamPrep: React.FC = () => {
           </div>
         </div>
       )}
+
+      <div className="px-4 md:px-8 pb-12 max-w-6xl mx-auto">
+        <MaterialPractice
+          initialDocumentId={summaryBridge.documentId}
+          autoOpen={summaryBridge.openMaterialPractice}
+        />
+      </div>
     </div>
   );
 };

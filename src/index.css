@@ -105,6 +105,50 @@ body {
     box-shadow: var(--shadow-raised);
   }
 
+  /* NotebookLM-style flashcard flip */
+  .flashcard-scene {
+    perspective: 1200px;
+    width: 100%;
+  }
+  .flashcard-pivot {
+    position: relative;
+    width: 100%;
+    min-height: 240px;
+    transform-style: preserve-3d;
+    transition: transform 0.55s cubic-bezier(0.4, 0.2, 0.2, 1);
+  }
+  .flashcard-pivot.is-flipped {
+    transform: rotateY(180deg);
+  }
+  .flashcard-face {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2rem;
+    border-radius: 1rem;
+    border: 1px solid color-mix(in srgb, var(--color-cardinal) 30%, transparent);
+    background: linear-gradient(
+      145deg,
+      var(--color-cardinal-soft) 0%,
+      var(--color-gold-soft) 100%
+    );
+    box-shadow: var(--shadow-card);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+  .flashcard-face.back {
+    transform: rotateY(180deg);
+    background: linear-gradient(
+      145deg,
+      var(--color-gold-soft) 0%,
+      var(--color-cardinal-soft) 100%
+    );
+  }
+
   /* Buttons */
   .btn-primary {
     display: inline-flex;
