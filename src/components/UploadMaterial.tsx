@@ -86,38 +86,41 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
   }[mode];
 
   return (
-    <div className="max-w-4xl mx-auto py-12 animate-slide-up">
+    <div className="max-w-4xl mx-auto py-4 md:py-8 animate-slide-up">
       {/* Selection Header */}
-      <div className="mb-12 text-center">
-        <h2 className="text-4xl md:text-6xl font-black mb-4 tracking-tighter">
-          Step 1: <span className="gradient-text">Add Material</span>
+      <div className="mb-10 text-center">
+        <p className="eyebrow mb-3">Step 1</p>
+        <h2 className="text-3xl md:text-5xl font-extrabold mb-4 tracking-tight text-ink">
+          Add <span className="text-cardinal">Material</span>
         </h2>
-        <p className="text-gray-500 font-medium text-lg">Choose how you'd like to provide your study content.</p>
+        <p className="text-muted text-lg">Choose how you'd like to provide your study content.</p>
       </div>
 
       {/* Mode Selector */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
         {[
-          { id: 'paste', label: 'Paste Text', icon: <FileText size={20} />, activeClass: 'border-purple-500/50 bg-purple-500/10' },
-          { id: 'file', label: 'Upload File', icon: <Upload size={20} />, activeClass: 'border-blue-500/50 bg-blue-500/10' },
-          { id: 'drive', label: 'Google Drive', icon: <Cloud size={20} />, activeClass: 'border-cyan-500/50 bg-cyan-500/10' },
+          { id: 'paste', label: 'Paste Text', icon: <FileText size={20} />, activeClass: '' },
+          { id: 'file', label: 'Upload File', icon: <Upload size={20} />, activeClass: '' },
+          { id: 'drive', label: 'Google Drive', icon: <Cloud size={20} />, activeClass: '' },
         ].map((item) => (
           <button
             key={item.id}
+            type="button"
             onClick={() => setMode(item.id as UploadMode)}
-            className={`p-6 rounded-3xl border-2 transition-all duration-300 flex flex-col items-center gap-3 cursor-pointer group ${
-              mode === item.id 
-                ? `${item.activeClass} border-opacity-100` 
-                : 'border-white/5 bg-white/[0.02] hover:border-white/10'
+            aria-pressed={mode === item.id}
+            className={`p-5 rounded-2xl border transition-colors duration-200 flex sm:flex-col items-center gap-3 cursor-pointer group ${
+              mode === item.id
+                ? 'border-cardinal bg-cardinal-soft ring-1 ring-cardinal'
+                : 'border-line bg-surface hover:border-line-strong'
             }`}
           >
             <div className={`p-3 rounded-2xl transition-colors ${
-              mode === item.id ? 'bg-white text-black' : 'bg-white/5 text-gray-400 group-hover:text-white'
+              mode === item.id ? 'bg-cardinal text-white' : 'bg-sunken text-muted group-hover:text-cardinal'
             }`}>
               {item.icon}
             </div>
             <span className={`font-bold transition-colors ${
-              mode === item.id ? 'text-white' : 'text-gray-500 group-hover:text-gray-300'
+              mode === item.id ? 'text-cardinal' : 'text-muted group-hover:text-ink'
             }`}>
               {item.label}
             </span>
@@ -137,7 +140,8 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
               className="w-full"
             >
               <textarea
-                className="w-full h-96 bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 text-xl text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/50 transition-all font-medium leading-relaxed shadow-inner"
+                aria-label="Study material"
+                className="w-full h-80 md:h-96 bg-surface border border-line-strong rounded-2xl p-5 md:p-7 text-base md:text-lg text-ink placeholder-muted/70 focus:outline-none focus:border-cardinal focus:ring-4 focus:ring-cardinal/10 transition-colors leading-relaxed"
                 placeholder="Paste your syllabus, lecture notes, textbook content, or study material here..."
                 value={content}
                 onChange={(e) => onContentChange(e.target.value)}
@@ -157,30 +161,30 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
               onDragOver={handleDrag}
               onDrop={handleDrop}
             >
-              <div className={`w-full h-96 border-2 border-dashed rounded-[2.5rem] flex flex-col items-center justify-center p-8 transition-all duration-300 ${
-                dragActive ? 'border-blue-500 bg-blue-500/10' : 'border-white/10 bg-white/[0.02]'
+              <div className={`w-full h-96 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center p-8 transition-all duration-300 ${
+                dragActive ? 'border-cardinal bg-cardinal-soft' : 'border-line-strong bg-surface'
               }`}>
                 {selectedFile ? (
                    <div className="text-center animate-scale-up">
-                      <div className="w-20 h-20 bg-blue-500/20 text-blue-400 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                      <div className="w-20 h-20 bg-success-soft text-success rounded-2xl flex items-center justify-center mx-auto mb-6">
                          <CheckCircle2 size={40} />
                       </div>
-                      <h3 className="text-2xl font-black mb-2">{selectedFile.name}</h3>
-                      <p className="text-gray-500 mb-8 font-medium">Ready for AI parsing and quiz generation.</p>
+                      <h3 className="text-2xl font-bold mb-2 text-ink break-all">{selectedFile.name}</h3>
+                      <p className="text-muted mb-8 font-medium">Ready for AI parsing and quiz generation.</p>
                       <button 
                         onClick={() => setSelectedFile(null)}
-                        className="text-sm font-bold text-gray-500 hover:text-white transition-colors"
+                        className="btn-link text-sm"
                       >
                         Choose a different file
                       </button>
                    </div>
                 ) : (
                    <div className="text-center">
-                      <div className="w-20 h-20 bg-white/5 text-gray-400 rounded-3xl flex items-center justify-center mx-auto mb-6 border border-white/5">
+                      <div className="w-20 h-20 bg-sunken text-muted rounded-2xl flex items-center justify-center mx-auto mb-6 border border-line">
                          <Upload size={32} />
                       </div>
-                      <h3 className="text-2xl font-black mb-2 text-white/90">Drag & Drop Here</h3>
-                      <p className="text-gray-500 mb-8 font-medium">Support for PDF, TXT, or DOCX files</p>
+                      <h3 className="text-2xl font-bold mb-2 text-ink">Drag & Drop Here</h3>
+                      <p className="text-muted mb-8 font-medium">Support for PDF, TXT, or DOCX files</p>
                       <input 
                         ref={fileInputRef}
                         type="file" 
@@ -191,7 +195,7 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
                       />
                       <button 
                         onClick={() => fileInputRef.current?.click()}
-                        className="px-8 py-3 bg-white text-black rounded-full font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform cursor-pointer"
+                        className="btn-secondary px-7 py-3 rounded-lg font-semibold text-sm"
                       >
                         Browse Files
                       </button>
@@ -207,16 +211,16 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 1.05 }}
-              className="w-full h-96 bg-white/[0.02] border border-white/10 rounded-[2.5rem] flex flex-col items-center justify-center p-8 text-center"
+              className="w-full h-96 bg-surface border border-line rounded-2xl flex flex-col items-center justify-center p-8 text-center"
             >
-              <div className="w-24 h-24 bg-cyan-500/10 text-cyan-400 rounded-full flex items-center justify-center mb-8 border border-cyan-500/20">
+              <div className="w-20 h-20 bg-sunken text-muted rounded-full flex items-center justify-center mb-6 border border-line">
                  <Cloud size={48} />
               </div>
-              <h3 className="text-3xl font-black mb-4">Google Drive Integration</h3>
-              <p className="text-gray-500 font-medium text-lg max-w-sm mb-10">
+              <h3 className="text-2xl md:text-3xl font-bold mb-4 text-ink">Google Drive Integration</h3>
+              <p className="text-muted font-medium text-lg max-w-sm mb-10">
                 Directly import your study folders and docs. This feature is coming in the next update!
               </p>
-              <div className="px-6 py-2 bg-white/5 border border-white/10 rounded-full text-[10px] font-black uppercase tracking-[0.3em] text-gray-500">
+              <div className="px-4 py-1.5 bg-gold-soft border border-gold/60 rounded-full text-[11px] font-bold uppercase tracking-widest text-ink">
                  Coming Next
               </div>
             </motion.div>
@@ -225,24 +229,21 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
       </div>
 
       {/* CTA Button */}
-      <div className="mt-12">
-        <button 
+      <div className="mt-10">
+        <button
+          type="button" 
           onClick={() => onStart(selectedFile?.name || "Manual Upload")}
           disabled={isSaving || isParsing || (mode === 'paste' && !content.trim()) || (mode === 'file' && !selectedFile) || mode === 'drive'}
-          className={`btn-premium w-full py-7 rounded-[2.5rem] font-black text-2xl shadow-xl shadow-purple-500/20 cursor-pointer transition-all flex items-center justify-center gap-3 ${
-            isSaving || isParsing || (mode === 'paste' && !content.trim()) || (mode === 'file' && !selectedFile) || mode === 'drive' 
-              ? 'opacity-50 grayscale cursor-not-allowed' 
-              : 'hover:scale-[1.01]'
-          }`}
+          className="btn-primary w-full py-5 rounded-xl font-semibold text-base md:text-lg"
         >
           {isSaving ? (
             <>
-              <Loader2 className="animate-spin" size={24} />
+              <Loader2 className="animate-spin" size={20} />
               Saving Study Material...
             </>
           ) : isParsing ? (
             <>
-              <Loader2 className="animate-spin" size={24} />
+              <Loader2 className="animate-spin" size={20} />
               Analyzing Document Context...
             </>
           ) : (

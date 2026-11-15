@@ -12,7 +12,7 @@ export const ConceptGapTags: React.FC<Props> = ({ tags }) => {
   return (
     <div className="flex flex-wrap gap-2">
       {tags.map((tag, idx) => (
-        <span key={idx} className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs">
+        <span key={idx} className="bg-danger-soft text-danger border border-danger/20 px-2 py-1 rounded-full text-xs font-semibold">
           {tag}
         </span>
       ))}

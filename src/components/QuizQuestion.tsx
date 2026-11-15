@@ -26,37 +26,39 @@ const QuizQuestion: React.FC<QuizQuestionProps> = ({ question, onAnswer, disable
     <div className="w-full animate-slide-up">
       {/* Question Header */}
       <div className="mb-8">
-        <div className="flex items-center gap-3 mb-4">
-          <span className="px-3 py-1 rounded-full bg-purple-500/10 text-purple-400 text-[10px] font-black uppercase tracking-widest border border-purple-500/20">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <span className="px-3 py-1 rounded-full bg-cardinal-soft text-cardinal text-[11px] font-bold uppercase tracking-wider border border-cardinal/20">
             Multiple Choice
           </span>
           {question.sourceTopic && (
-            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+            <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">
               Topic: {question.sourceTopic}
             </span>
           )}
         </div>
-        <h3 className="text-2xl md:text-3xl font-black text-white leading-tight">
+        <h3 className="text-xl md:text-2xl font-bold text-ink leading-snug">
           {question.question}
         </h3>
       </div>
 
       {/* MCQ Options */}
-      <div className="grid grid-cols-1 gap-4">
+      <div className="grid grid-cols-1 gap-3">
         {question.options!.map((option, idx) => (
           <button
             key={idx}
+            type="button"
+            aria-pressed={selectedOption === option}
             onClick={() => handleMcqSubmit(option)}
             disabled={disabled}
-            className={`w-full p-6 rounded-2xl text-left font-bold transition-all border-2 ${
-              selectedOption === option 
-                ? 'bg-purple-600/40 border-purple-400 text-white shadow-2xl shadow-purple-500/40 scale-[0.98]' 
-                : 'bg-white/[0.03] border-white/5 text-gray-400 hover:bg-white/[0.05] hover:border-white/10'
-            } ${disabled ? 'cursor-not-allowed' : 'cursor-pointer active:scale-95'}`}
+            className={`w-full p-4 md:p-5 rounded-xl text-left font-semibold transition-colors border ${
+              selectedOption === option
+                ? 'bg-cardinal-soft border-cardinal ring-1 ring-cardinal text-ink'
+                : 'bg-surface border-line text-ink hover:bg-sunken hover:border-line-strong'
+            } ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
           >
             <div className="flex items-center gap-4">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors ${
-                selectedOption === option ? 'border-white bg-white text-purple-600' : 'border-white/20'
+              <div className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center border text-sm font-bold transition-colors ${
+                selectedOption === option ? 'border-cardinal bg-cardinal text-white' : 'border-line-strong text-muted'
               }`}>
                 {String.fromCharCode(65 + idx)}
               </div>

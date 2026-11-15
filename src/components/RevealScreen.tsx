@@ -31,16 +31,12 @@ const RevealScreen: React.FC<RevealScreenProps> = ({ scoreResult }) => {
       {/* 1. Depth insight card */}
       {same_answer_different_depth && (
         <div
-          className="rounded-2xl p-4 space-y-1"
-          style={{
-            background: 'rgba(124,58,237,0.15)',
-            border: '1px solid rgba(139,92,246,0.3)',
-          }}
+          className="rounded-2xl p-4 space-y-1 bg-cardinal-soft border border-cardinal/20"
         >
-          <p className="text-purple-400 text-xs font-semibold uppercase tracking-widest">
+          <p className="text-cardinal text-xs font-semibold uppercase tracking-widest">
             Same answer · different depth
           </p>
-          <p className="text-purple-100 font-medium text-sm">{depth_insight}</p>
+          <p className="text-ink font-medium text-sm">{depth_insight}</p>
         </div>
       )}
 
@@ -69,11 +65,7 @@ const RevealScreen: React.FC<RevealScreenProps> = ({ scoreResult }) => {
       {winner !== 'tie' ? (
         <div className="text-center py-2">
           <span
-            className="text-xs font-semibold px-4 py-1.5 rounded-full text-purple-200"
-            style={{
-              background: 'rgba(124,58,237,0.25)',
-              border: '1px solid rgba(139,92,246,0.4)',
-            }}
+            className="text-xs font-semibold px-4 py-1.5 rounded-full text-ink bg-gold-soft border border-gold/60"
           >
             🏆 Peer {winner} showed deeper understanding
           </span>
@@ -81,11 +73,7 @@ const RevealScreen: React.FC<RevealScreenProps> = ({ scoreResult }) => {
       ) : (
         <div className="text-center py-2">
           <span
-            className="text-xs font-semibold px-4 py-1.5 rounded-full text-green-300"
-            style={{
-              background: 'rgba(20,184,166,0.2)',
-              border: '1px solid rgba(94,234,212,0.3)',
-            }}
+            className="text-xs font-semibold px-4 py-1.5 rounded-full text-success bg-success-soft border border-success/25"
           >
             🤝 Both students performed equally well
           </span>

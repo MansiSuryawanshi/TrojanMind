@@ -1,14 +1,16 @@
-# 🧠 StudyBuddy
+# 🧠 TrojanMind
 
-> **"NotebookLM helps you study - StudyBuddy makes sure you actually understand."**
+**Learn together. Reason deeper.**
+
+> **"NotebookLM helps you study - TrojanMind makes sure you actually understand."**
 
 ---
 
 ## 🚀 Overview
 
-StudyBuddy is an AI-powered learning system that evaluates how **deeply** a student understands a concept, not just whether they can produce a correct answer.
+TrojanMind is an AI-powered learning system that evaluates how **deeply** a student understands a concept, not just whether they can produce a correct answer.
 
-Instead of passive learning through summaries, StudyBuddy creates an **interactive feedback loop** that challenges thinking, detects weaknesses, and actively improves learning.
+Instead of passive learning through summaries, TrojanMind creates an **interactive feedback loop** that challenges thinking, detects weaknesses, and actively improves learning.
 
 ---
 
@@ -32,7 +34,7 @@ This leads to:
 
 ## ✨ Our Solution
 
-StudyBuddy transforms learning into an **active, adaptive process**.
+TrojanMind transforms learning into an **active, adaptive process**.
 
 It doesn't just give answers — it:
 - ✅ Evaluates your thinking
@@ -78,9 +80,9 @@ It doesn't just give answers — it:
 
 ---
 
-## 🆚 What Makes StudyBuddy Unique?
+## 🆚 What Makes TrojanMind Unique?
 
-| Feature | Traditional Tools | StudyBuddy |
+| Feature | Traditional Tools | TrojanMind |
 |---|---|---|
 | Summarization | ✅ | ❌ |
 | Checks correctness | ❌ | ✅ |
@@ -89,7 +91,7 @@ It doesn't just give answers — it:
 | Challenges thinking | ❌ | ✅ |
 | Adaptive learning loop | ❌ | ✅ |
 
-> 👉 **StudyBuddy focuses on *how* you think, not just *what* you know.**
+> 👉 **TrojanMind focuses on *how* you think, not just *what* you know.**
 
 ---
 
@@ -192,7 +194,7 @@ node server.js
 
 Most students memorize — few truly understand.
 
-StudyBuddy changes that by:
+TrojanMind changes that by:
 - Encouraging deep thinking
 - Identifying real conceptual gaps
 - Providing actionable improvement

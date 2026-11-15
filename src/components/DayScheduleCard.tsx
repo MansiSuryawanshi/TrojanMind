@@ -13,24 +13,26 @@ export const DayScheduleCard: React.FC<DayScheduleCardProps> = ({ day }) => {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <div className="glass rounded-2xl overflow-hidden transition-all duration-300 hover:border-purple-500/20">
+    <div className="surface rounded-xl overflow-hidden transition-colors duration-200 hover:border-line-strong">
       {/* Day header */}
       <button
+        type="button"
         onClick={() => setCollapsed((v) => !v)}
-        className="w-full flex items-center justify-between px-5 py-4 cursor-pointer text-left"
+        aria-expanded={!collapsed}
+        className="w-full flex items-center justify-between px-4 sm:px-5 py-4 cursor-pointer text-left hover:bg-canvas"
       >
         <div className="flex items-center gap-3">
-          <span className="text-sm font-bold text-white">{day.day}</span>
-          <span className="text-xs text-gray-500">{day.sessions.length} session{day.sessions.length !== 1 ? 's' : ''}</span>
+          <span className="text-sm font-bold text-ink">{day.day}</span>
+          <span className="text-xs text-muted px-2 py-0.5 rounded-full bg-sunken">{day.sessions.length} session{day.sessions.length !== 1 ? 's' : ''}</span>
         </div>
-        <span className={`text-gray-500 text-xs transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}>
+        <span aria-hidden="true" className={`text-muted text-xs transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}>
           ▲
         </span>
       </button>
 
       {/* Sessions */}
       {!collapsed && (
-        <div className="px-5 pb-3 border-t border-white/[0.05]">
+        <div className="px-4 sm:px-5 pb-3 border-t border-line">
           {day.sessions.map((session, i) => (
             <SessionSlot
               key={i}

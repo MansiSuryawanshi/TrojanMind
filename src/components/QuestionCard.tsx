@@ -13,26 +13,21 @@ interface QuestionCardProps {
 
 const QuestionCard: React.FC<QuestionCardProps> = ({ question, subject, challengeNumber, total }) => {
   return (
-    <div className="glass-card rounded-2xl p-5 w-full">
+    <div className="surface rounded-2xl p-5 w-full">
       {/* Top row */}
       <div className="flex items-center justify-between mb-4">
         <span
-          className="text-xs font-semibold px-3 py-1 rounded-full"
-          style={{
-            background: 'rgba(139,92,246,0.2)',
-            color: '#c4b5fd',
-            border: '1px solid rgba(139,92,246,0.3)',
-          }}
+          className="text-xs font-semibold px-3 py-1 rounded-full bg-cardinal-soft text-cardinal border border-cardinal/20"
         >
           {subject}
         </span>
-        <span className="text-xs font-medium text-gray-400">
+        <span className="text-xs font-medium text-muted">
           Challenge {challengeNumber} of {total}
         </span>
       </div>
 
       {/* Question text */}
-      <p className="text-white font-semibold text-lg leading-snug">{question}</p>
+      <p className="text-ink font-semibold text-lg leading-snug">{question}</p>
     </div>
   );
 };

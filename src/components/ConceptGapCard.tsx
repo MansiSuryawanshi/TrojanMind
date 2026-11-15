@@ -12,13 +12,9 @@ interface ConceptGapCardProps {
 
 const GapTag: React.FC<{ label: string; student: string }> = ({ label, student }) => (
   <div className="flex items-start gap-3">
-    <span className="text-xs text-gray-500 font-medium pt-0.5 shrink-0">Peer {student}</span>
+    <span className="text-xs text-muted font-medium pt-0.5 shrink-0">Peer {student}</span>
     <span
-      className="text-xs font-semibold px-3 py-1.5 rounded-full text-orange-300"
-      style={{
-        background: 'rgba(249,115,22,0.2)',
-        border: '1px solid rgba(249,115,22,0.3)',
-      }}
+      className="text-xs font-semibold px-3 py-1.5 rounded-full text-warning bg-warning-soft border border-warning/25"
     >
       {label}
     </span>
@@ -32,8 +28,8 @@ const ConceptGapCard: React.FC<ConceptGapCardProps> = ({ conceptGapA, conceptGap
   if (!showA && !showB) return null;
 
   return (
-    <div className="glass-card rounded-2xl p-4 mt-3 space-y-3">
-      <p className="text-xs font-semibold text-gray-200 uppercase tracking-wide">
+    <div className="surface rounded-2xl p-4 mt-3 space-y-3">
+      <p className="text-xs font-semibold text-ink uppercase tracking-wide">
         Concept gap detected
       </p>
 
@@ -42,7 +38,7 @@ const ConceptGapCard: React.FC<ConceptGapCardProps> = ({ conceptGapA, conceptGap
         {showB && <GapTag label={conceptGapB!} student="B" />}
       </div>
 
-      <p className="text-xs text-gray-500">
+      <p className="text-xs text-muted">
         Next challenge will target this gap specifically.
       </p>
     </div>

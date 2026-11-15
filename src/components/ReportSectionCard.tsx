@@ -6,17 +6,17 @@ interface ReportSectionCardProps {
 }
 
 function scoreClasses(score: number): string {
-  if (score >= 75) return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20';
-  if (score >= 50) return 'bg-blue-500/15 text-blue-400 border-blue-500/20';
-  return 'bg-red-500/15 text-red-400 border-red-500/20';
+  if (score >= 75) return 'bg-success-soft text-success border-success/25';
+  if (score >= 50) return 'bg-gold-soft text-ink border-gold/60';
+  return 'bg-danger-soft text-danger border-danger/25';
 }
 
 export const ReportSectionCard: React.FC<ReportSectionCardProps> = ({ section }) => {
   return (
-    <div id={`section-${section.title}`} className="glass rounded-xl p-5 mb-3">
+    <div id={`section-${section.title}`} className="surface rounded-xl p-5 mb-3">
       {/* Title + score badge */}
       <div className="flex justify-between items-center mb-3">
-        <p className="text-sm font-semibold text-white m-0">{section.title}</p>
+        <p className="text-sm font-semibold text-ink m-0">{section.title}</p>
         <span
           className={`text-xs font-bold px-2.5 py-1 rounded-full border ${scoreClasses(section.score)}`}
         >
@@ -25,21 +25,21 @@ export const ReportSectionCard: React.FC<ReportSectionCardProps> = ({ section })
       </div>
 
       {/* Summary */}
-      <p className="text-sm text-gray-400 leading-relaxed mb-3">{section.summary}</p>
+      <p className="text-sm text-muted leading-relaxed mb-3">{section.summary}</p>
 
       {/* Key findings */}
       <ul className="space-y-1.5 mb-3 p-0 list-none">
         {section.keyFindings.map((finding, i) => (
-          <li key={i} className="flex items-start gap-2 text-sm text-gray-400 leading-snug">
-            <span className="text-purple-400 font-bold shrink-0 mt-0.5">•</span>
+          <li key={i} className="flex items-start gap-2 text-sm text-muted leading-snug">
+            <span className="text-gold-ink font-bold shrink-0 mt-0.5">•</span>
             {finding}
           </li>
         ))}
       </ul>
 
       {/* Recommendation */}
-      <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-sm text-purple-300 leading-relaxed">
-        <strong className="text-purple-200">Recommendation:</strong> {section.recommendation}
+      <div className="p-3 rounded-xl bg-cardinal-soft border border-cardinal/20 text-sm text-ink leading-relaxed">
+        <strong className="text-cardinal">Recommendation:</strong> {section.recommendation}
       </div>
     </div>
   );

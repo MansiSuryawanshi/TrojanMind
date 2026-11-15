@@ -1,6 +1,6 @@
 /**
  * TopicCoverage – animated progress bars for each study topic.
- * Color rules: >75% purple, 50–75% amber, <50% red.
+ * Color rules: >75% green (strong), 50–75% amber, <50% red.
  * Owner: Developer 3 (Exam Prep)
  */
 import React, { useEffect, useState } from 'react';
@@ -18,13 +18,13 @@ export const TopicCoverage: React.FC = () => {
   }, []);
 
   const getBarColor = (pct: number) => {
-    if (pct > 75) return 'var(--accent)';       // purple
+    if (pct > 75) return 'var(--success)';      // strong
     if (pct >= 50) return 'var(--amber)';        // amber
     return 'var(--danger)';                      // red
   };
 
   const getBadge = (pct: number) => {
-    if (pct > 75) return { label: 'Strong', cls: 'badge-purple' };
+    if (pct > 75) return { label: 'Strong', cls: 'badge-green' };
     if (pct >= 50) return { label: 'Moderate', cls: 'badge-amber' };
     return { label: 'Weak', cls: 'badge-red' };
   };

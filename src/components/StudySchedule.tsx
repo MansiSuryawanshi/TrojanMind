@@ -124,9 +124,9 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
   if (!isInitialLoadComplete) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
-        <div className="text-center">
+        <div className="text-center" role="status">
           <div className="spinner mx-auto mb-4" />
-          <p className="text-gray-400">Loading your knowledge map...</p>
+          <p className="text-muted">Loading your knowledge map...</p>
         </div>
       </div>
     );
@@ -135,46 +135,45 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
   // ── Empty state ──────────────────────────────────────────────────────────
   if (allAttempts.length === 0 && localSchedule === null) {
     return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center px-6 text-center">
-        <div className="orb w-64 h-64 bg-purple-600/20 -z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 absolute" />
-        <div className="animate-slide-up">
+      <div className="min-h-[70vh] flex flex-col items-center justify-center px-4 text-center">
+        <div className="animate-slide-up surface rounded-2xl px-6 py-12 md:px-12 max-w-lg w-full">
           <div className="text-5xl mb-6">📅</div>
-          <h2 className="text-4xl font-black text-white mb-3">No Plan Yet</h2>
-          <p className="text-gray-400 mb-10 max-w-sm">Complete a challenge to unlock your personalized adaptive study plan.</p>
-          <button onClick={onSwitchToChallenge} className="btn-premium px-10 py-4 rounded-2xl text-white font-bold">Start a Challenge →</button>
+          <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink mb-3">No Plan Yet</h2>
+          <p className="text-muted mb-8 max-w-sm mx-auto">Complete a challenge to unlock your personalized adaptive study plan.</p>
+          <button onClick={onSwitchToChallenge} className="btn-primary px-8 py-3.5 rounded-xl font-semibold">Start a Challenge →</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="px-6 md:px-12 py-10 max-w-3xl mx-auto">
+    <div className="px-4 sm:px-6 py-8 md:py-10 max-w-3xl mx-auto">
       <div className="mb-8 animate-slide-up">
-        <h1 className="text-4xl font-black text-white mb-2">Adaptive Plan</h1>
-        <div className="flex items-center gap-3">
-          <p className="text-gray-400">Based on your concept gaps</p>
-          {totalSessions > 0 && <span className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs font-semibold">{totalSessions} sessions planned</span>}
+        <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink mb-2">Adaptive Plan</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-muted">Based on your concept gaps</p>
+          {totalSessions > 0 && <span className="px-3 py-1 rounded-full bg-success-soft border border-success/25 text-success text-xs font-semibold">{totalSessions} sessions planned</span>}
         </div>
       </div>
 
       {localSchedule?.readiness_message && (
-        <div className="mb-6 p-4 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-sm text-purple-300">
-          <span className="font-semibold text-purple-200">Priority gap: </span>
-          <span className="text-white font-medium">{localSchedule.priority_gap}</span> — {localSchedule.readiness_message}
+        <div className="mb-6 p-4 rounded-xl bg-surface border border-line border-l-4 border-l-cardinal text-sm text-muted">
+          <span className="font-semibold text-cardinal">Priority gap: </span>
+          <span className="text-ink font-semibold">{localSchedule.priority_gap}</span> — {localSchedule.readiness_message}
         </div>
       )}
 
       {localSchedule?.isFallback && (
-        <div className="mb-5 p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex flex-col gap-1 animate-fade-in">
-          <span className="text-sm font-black text-blue-400 uppercase tracking-widest">Grounded Fallback</span>
-          <p className="text-xs text-blue-300 font-medium">AI generation failed/unavailable. Showing a static plan optimized for your recent mistakes and exam deadline.</p>
+        <div className="mb-5 p-4 rounded-xl bg-info-soft border border-info/20 flex flex-col gap-1 animate-fade-in">
+          <span className="text-xs font-bold text-info uppercase tracking-wider">Grounded Fallback</span>
+          <p className="text-sm text-ink">AI generation failed/unavailable. Showing a static plan optimized for your recent mistakes and exam deadline.</p>
         </div>
       )}
 
       {newGapsNudge && (
-        <div className="mb-5 p-4 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex justify-between items-center animate-fade-in shadow-lg shadow-orange-500/5">
-          <span className="text-sm text-orange-300 font-medium">New performance data — recalculate plan?</span>
-          <button onClick={() => void fetchSchedule()} className="ml-4 shrink-0 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 text-orange-200 rounded-xl px-4 py-1.5 text-xs font-bold transition-all cursor-pointer">Regenerate</button>
+        <div className="mb-5 p-4 rounded-xl bg-gold-soft border border-gold/60 flex flex-wrap gap-3 justify-between items-center animate-fade-in" role="status">
+          <span className="text-sm text-ink font-medium">New performance data — recalculate plan?</span>
+          <button type="button" onClick={() => void fetchSchedule()} className="btn-secondary shrink-0 rounded-lg px-4 py-1.5 text-xs font-semibold">Regenerate</button>
         </div>
       )}
 
@@ -182,16 +181,16 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
 
       {/* Loading */}
       {loading && (
-        <div className="text-center py-20">
-          <div className="text-5xl mb-5 animate-bounce-dot" style={{ animationDuration: '1s' }}>⏳</div>
-          <p className="text-gray-400 text-base">Generating your adaptive plan...</p>
-          <p className="text-gray-600 text-sm mt-1">Claude is thinking hard for you</p>
+        <div className="text-center py-16" role="status">
+          <div className="spinner mx-auto mb-5" />
+          <p className="text-ink text-base font-medium">Generating your adaptive plan...</p>
+          <p className="text-muted text-sm mt-1">Claude is thinking hard for you</p>
         </div>
       )}
 
       {/* Error */}
       {error && (
-        <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm mb-6">
+        <div className="p-4 rounded-xl bg-danger-soft border border-danger/20 text-danger text-sm mb-6" role="alert">
           <span className="font-semibold">Error: </span>{error}
         </div>
       )}
@@ -210,7 +209,8 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
         <div className="text-center mt-8">
           <button
             onClick={() => void fetchSchedule()}
-            className="btn-outline px-8 py-3 rounded-2xl text-purple-400 text-sm font-bold border border-purple-500/30 hover:border-purple-500/60 transition-all cursor-pointer"
+            type="button"
+            className="btn-secondary px-8 py-3 rounded-xl text-sm font-semibold"
           >
             Regenerate Plan
           </button>

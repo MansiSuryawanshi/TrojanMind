@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server": "node --env-file-if-exists=server/.env.local server/index.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "firebase": "^12.11.0",
+    "firebase-admin": "^14.5.1",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.7.0",
     "pdfjs-dist": "^5.6.205",

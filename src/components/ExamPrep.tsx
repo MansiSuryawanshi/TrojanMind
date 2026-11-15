@@ -74,7 +74,7 @@ export const ExamPrep: React.FC = () => {
 
   const getReadinessPill = (score: number) => {
     if (score >= 75) return { label: 'Ready!',        cls: 'ep-pill-green' };
-    if (score >= 50) return { label: 'Almost there',  cls: 'ep-pill-teal' };
+    if (score >= 50) return { label: 'Almost there',  cls: 'ep-pill-gold' };
     return              { label: 'Not ready yet',     cls: 'ep-pill-amber' };
   };
 
@@ -84,9 +84,9 @@ export const ExamPrep: React.FC = () => {
   if (isLoading) {
     return (
       <div className="ep-root flex items-center justify-center min-h-[60vh]">
-        <div className="text-center">
+        <div className="text-center" role="status">
           <div className="spinner mx-auto mb-4" />
-          <p className="text-gray-400">Analyzing study landscape...</p>
+          <p className="text-muted">Analyzing study landscape...</p>
         </div>
       </div>
     );
@@ -105,11 +105,25 @@ export const ExamPrep: React.FC = () => {
           </p>
         </div>
         <div className="ep-header-right">
-          <div className="ep-days-box" onClick={() => setIsEditingDate(true)} style={{ cursor: 'pointer' }}>
+          <div
+            className="ep-days-box"
+            role={isEditingDate ? undefined : 'button'}
+            tabIndex={isEditingDate ? undefined : 0}
+            aria-label={isEditingDate ? undefined : 'Set exam date'}
+            onClick={() => setIsEditingDate(true)}
+            onKeyDown={(e) => {
+              if (!isEditingDate && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                setIsEditingDate(true);
+              }
+            }}
+            style={{ cursor: 'pointer' }}
+          >
             {isEditingDate ? (
               <input 
                 type="date" 
                 className="ep-date-input"
+                aria-label="Exam date"
                 autoFocus
                 onChange={handleDateChange}
                 onBlur={() => setIsEditingDate(false)}

@@ -26,21 +26,13 @@ const AnalyzingState: React.FC = () => {
   }, []);
 
   return (
-    <div className="glass-card rounded-2xl p-10 text-center flex flex-col items-center gap-6">
-      {/* Spinning gradient ring */}
-      <div
-        className="w-16 h-16 rounded-full gradient-border animate-spin-slow flex-shrink-0"
-        style={{ padding: 3 }}
-      >
-        <div
-          className="w-full h-full rounded-full"
-          style={{ background: 'rgba(15,12,41,0.9)' }}
-        />
-      </div>
+    <div className="surface rounded-2xl p-10 text-center flex flex-col items-center gap-6" role="status" aria-live="polite">
+      {/* Spinner */}
+      <div className="spinner w-14 h-14 flex-shrink-0" aria-hidden="true" />
 
       {/* Cycling message */}
       <p
-        className="text-white text-lg font-medium transition-opacity duration-300"
+        className="text-ink text-lg font-medium transition-opacity duration-300"
         style={{ opacity: fade ? 1 : 0 }}
       >
         {MESSAGES[messageIndex]}
@@ -51,7 +43,7 @@ const AnalyzingState: React.FC = () => {
         {[0, 1, 2].map((i) => (
           <span
             key={i}
-            className="w-2.5 h-2.5 rounded-full bg-purple-400"
+            className="w-2.5 h-2.5 rounded-full bg-cardinal"
             style={{
               animation: `bounce-dot 1.2s ease-in-out ${i * 0.25}s infinite`,
             }}
@@ -59,7 +51,7 @@ const AnalyzingState: React.FC = () => {
         ))}
       </div>
 
-      <p className="text-xs text-gray-500 font-medium tracking-widest uppercase">
+      <p className="text-xs text-muted font-medium tracking-widest uppercase">
         AI Reasoning Engine
       </p>
     </div>

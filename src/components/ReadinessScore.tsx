@@ -53,14 +53,8 @@ export const ReadinessScore: React.FC<Props> = ({ score, previousScore }) => {
 
   const getBadgeColor = (s: number) => {
     if (s >= 75) return 'var(--ready-green)';
-    if (s >= 50) return 'var(--almost-teal)';
+    if (s >= 50) return 'var(--almost-gold)';
     return 'var(--not-ready-amber)';
-  };
-
-  const getGlow = (s: number) => {
-    if (s >= 75) return '0 0 32px rgba(52,211,153,0.35)';
-    if (s >= 50) return '0 0 32px rgba(45,212,191,0.3)';
-    return '0 0 32px rgba(251,191,36,0.3)';
   };
 
   const arcPercent = displayScore / 100;
@@ -73,9 +67,9 @@ export const ReadinessScore: React.FC<Props> = ({ score, previousScore }) => {
       <p className="readiness-label">Exam Readiness</p>
 
       <div className="readiness-ring-wrap">
-        <svg width="140" height="140" viewBox="0 0 140 140">
+        <svg width="140" height="140" viewBox="0 0 140 140" role="img" aria-label={`Exam readiness ${displayScore} out of 100`}>
           {/* track */}
-          <circle cx="70" cy="70" r={r} fill="none" stroke="var(--border)" strokeWidth="10" />
+          <circle cx="70" cy="70" r={r} fill="none" stroke="var(--color-sunken)" strokeWidth="10" />
           {/* progress arc */}
           <circle
             cx="70"
@@ -90,7 +84,6 @@ export const ReadinessScore: React.FC<Props> = ({ score, previousScore }) => {
             transform="rotate(-90 70 70)"
             style={{
               transition: 'stroke-dasharray 0.05s linear, stroke 0.4s ease',
-              filter: `drop-shadow(${getGlow(displayScore)})`,
             }}
           />
         </svg>

@@ -486,28 +486,28 @@ const ReasoningChallenge: React.FC = () => {
   if (phase === 'no-content') {
     return (
       <div className="max-w-2xl mx-auto py-20 text-center animate-fade-in">
-        <div className="w-20 h-20 bg-white/[0.03] rounded-3xl flex items-center justify-center mx-auto mb-8 border border-white/5 shadow-2xl">
+        <div className="w-20 h-20 bg-surface rounded-2xl flex items-center justify-center mx-auto mb-8 border border-line text-muted">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         </div>
-        <h2 className="text-3xl font-black mb-4 text-white">No Study Material Found</h2>
-        <p className="text-gray-500 mb-8">Upload some notes or PDFs to start the reasoning challenge.</p>
-        <button onClick={() => window.location.href = '/'} className="btn-outline px-8 py-4 rounded-2xl font-bold">Go to Upload</button>
+        <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight mb-4 text-ink">No Study Material Found</h2>
+        <p className="text-muted mb-8">Upload some notes or PDFs to start the reasoning challenge.</p>
+        <button onClick={() => window.location.href = '/'} className="btn-secondary px-8 py-3.5 rounded-xl font-semibold">Go to Upload</button>
       </div>
     );
   }
 
   if (phase === 'selection') {
     return (
-      <div className="max-w-4xl mx-auto py-12 px-6 animate-fade-in">
-        <div className="flex items-center justify-between mb-10">
+      <div className="max-w-4xl mx-auto py-6 md:py-10 animate-fade-in">
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
           <div>
-            <h2 className="text-4xl font-black text-white mb-2">Reasoning Challenge</h2>
-            <p className="text-gray-400 font-medium">Step 1: Pick your source materials.</p>
+            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink mb-2">Reasoning Challenge</h2>
+            <p className="text-muted">Step 1: Pick your source materials.</p>
           </div>
           {selectedDocIds.size > 0 && (
             <button 
               onClick={handleBulkDelete}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-all font-bold text-sm"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-danger-soft text-danger border border-danger/20 hover:border-danger/50 transition-colors font-semibold text-sm cursor-pointer"
             >
               <Trash size={16} />
               Delete Selected ({selectedDocIds.size})
@@ -515,7 +515,7 @@ const ReasoningChallenge: React.FC = () => {
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
           {documents.map((doc) => (
             <div 
               key={doc.id} 
@@ -525,16 +525,17 @@ const ReasoningChallenge: React.FC = () => {
                 else next.add(doc.id!);
                 setSelectedDocIds(next);
               }} 
-              className={`group relative p-6 rounded-3xl border-2 transition-all cursor-pointer ${selectedDocIds.has(doc.id!) ? 'border-purple-500 bg-purple-500/10 shadow-2xl shadow-purple-500/20' : 'border-white/5 bg-white/[0.02] hover:border-white/10'}`}
+              className={`group relative p-5 md:p-6 rounded-2xl border transition-colors cursor-pointer ${selectedDocIds.has(doc.id!) ? 'border-cardinal bg-cardinal-soft ring-1 ring-cardinal' : 'border-line bg-surface hover:border-line-strong shadow-[var(--shadow-card)]'}`}
             >
               <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0 pr-10">
-                  <h3 className="font-bold text-lg text-white mb-1 truncate">{doc.fileName}</h3>
-                  <p className="text-xs text-gray-500 font-medium">Uploaded {new Date((doc.uploadedAt?.seconds || 0) * 1000).toLocaleDateString()}</p>
+                <div className="flex-1 min-w-0 pr-4 pl-4">
+                  <h3 className="font-bold text-lg text-ink mb-1 truncate">{doc.fileName}</h3>
+                  <p className="text-xs text-muted font-medium">Uploaded {new Date((doc.uploadedAt?.seconds || 0) * 1000).toLocaleDateString()}</p>
                 </div>
                 <button 
                   onClick={(e) => handleDeleteDoc(e, doc.id!)}
-                  className="p-2 rounded-xl bg-white/5 text-gray-500 hover:bg-red-500/10 hover:text-red-400 transition-all opacity-0 group-hover:opacity-100"
+                  className="p-2 rounded-lg bg-sunken text-muted hover:bg-danger-soft hover:text-danger transition-colors md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer"
+                  aria-label={`Delete ${doc.fileName}`}
                   title="Delete material"
                 >
                   <Trash2 size={18} />
@@ -542,17 +543,17 @@ const ReasoningChallenge: React.FC = () => {
               </div>
               
               {selectedDocIds.has(doc.id!) && (
-                <div className="absolute top-4 left-4 w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+                <div className="absolute top-[30px] left-4 w-2 h-2 rounded-full bg-cardinal" aria-hidden="true" />
               )}
             </div>
           ))}
         </div>
 
-        <div className="sticky bottom-8 flex justify-center">
+        <div className="sticky bottom-6 flex justify-center">
           <button 
             disabled={selectedDocIds.size === 0} 
             onClick={() => setPhase('mode-selection')} 
-            className={`btn-premium px-12 py-5 rounded-2xl font-black text-xl shadow-2xl ${selectedDocIds.size === 0 ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
+            className="btn-primary px-10 py-4 rounded-xl font-semibold text-lg"
           >
             Next Step →
           </button>
@@ -563,36 +564,36 @@ const ReasoningChallenge: React.FC = () => {
 
   if (phase === 'mode-selection') {
     return (
-      <div className="max-w-2xl mx-auto py-12 px-6 animate-fade-in text-center">
-        <h2 className="text-4xl font-black text-white mb-2">Challenge Mode</h2>
-        <p className="text-gray-400 font-medium mb-12">How would you like to compete?</p>
-        <div className="grid grid-cols-1 gap-6 mb-12">
+      <div className="max-w-2xl mx-auto py-6 md:py-10 animate-fade-in text-center">
+        <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink mb-2">Challenge Mode</h2>
+        <p className="text-muted mb-10">How would you like to compete?</p>
+        <div className="grid grid-cols-1 gap-4 mb-10">
           <button 
             onClick={() => { setIsSoloMode(true); setPhase('count-selection'); }} 
-            className="p-10 rounded-3xl border-2 border-white/5 bg-white/[0.02] text-left hover:border-purple-500 hover:bg-purple-500/5 transition-all group"
+            className="p-6 md:p-8 rounded-2xl border border-line bg-surface text-left card-hover cursor-pointer shadow-[var(--shadow-card)]"
           >
-            <h3 className="text-2xl font-black text-white mb-1">Solo vs Claude</h3>
-            <p className="text-gray-500 font-bold">Face the Grandmaster AI one-on-one.</p>
+            <h3 className="text-xl md:text-2xl font-bold text-ink mb-1">Solo vs Claude</h3>
+            <p className="text-muted font-medium">Face the Grandmaster AI one-on-one.</p>
           </button>
           <button 
             onClick={() => { setIsSoloMode(false); setPhase('count-selection'); }} 
-            className="p-10 rounded-3xl border-2 border-purple-500 bg-purple-500/10 text-left hover:shadow-2xl hover:shadow-purple-500/20 transition-all"
+            className="p-6 md:p-8 rounded-2xl border border-cardinal bg-cardinal-soft text-left card-hover cursor-pointer"
           >
-            <h3 className="text-2xl font-black text-white mb-1">Live Multiplayer</h3>
-            <p className="text-purple-400 font-bold italic">Create a room and invite friends.</p>
+            <h3 className="text-xl md:text-2xl font-bold text-ink mb-1">Live Multiplayer</h3>
+            <p className="text-cardinal font-semibold">Create a room and invite friends.</p>
           </button>
         </div>
-        <button onClick={() => setPhase('selection')} className="text-gray-500 font-bold hover:text-white transition-colors">← Back to Materials</button>
+        <button onClick={() => setPhase('selection')} className="btn-link">← Back to Materials</button>
       </div>
     );
   }
 
   if (phase === 'count-selection') {
     return (
-      <div className="max-w-2xl mx-auto py-12 px-6 animate-fade-in text-center">
-        <h2 className="text-4xl font-black text-white mb-2">Question Count</h2>
-        <p className="text-gray-400 font-medium mb-10">Choose the length of your reasoning challenge.</p>
-        <div className="grid grid-cols-2 gap-4 mb-12">
+      <div className="max-w-2xl mx-auto py-6 md:py-10 animate-fade-in text-center">
+        <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink mb-2">Question Count</h2>
+        <p className="text-muted mb-10">Choose the length of your reasoning challenge.</p>
+        <div className="grid grid-cols-2 gap-3 md:gap-4 mb-10">
           {[5, 10, 20, 50].map((count) => (
             <button 
               key={count} 
@@ -600,23 +601,24 @@ const ReasoningChallenge: React.FC = () => {
                 setQuestionCount(count); 
                 console.log(`[Challenge] Question count selected: ${count}`);
               }} 
-              className={`p-10 rounded-3xl border-2 transition-all font-black text-3xl ${questionCount === count ? 'border-purple-500 bg-purple-500/10 text-white shadow-2xl shadow-purple-500/20' : 'border-white/5 bg-white/[0.02] text-gray-500 hover:border-white/10'}`}
+              aria-pressed={questionCount === count}
+              className={`p-6 md:p-8 rounded-2xl border transition-colors font-bold text-3xl cursor-pointer ${questionCount === count ? 'border-cardinal bg-cardinal-soft ring-1 ring-cardinal text-cardinal' : 'border-line bg-surface text-ink hover:border-line-strong shadow-[var(--shadow-card)]'}`}
             >
               {count}
-              <span className="block text-xs font-bold text-gray-500 mt-2 uppercase tracking-widest">Questions</span>
+              <span className="block text-xs font-semibold text-muted mt-2 uppercase tracking-wider">Questions</span>
             </button>
           ))}
         </div>
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col items-center gap-4">
           <button 
             onClick={handleCreateRoom} 
-            className="btn-premium px-12 py-5 rounded-2xl font-black text-xl shadow-2xl"
+            className="btn-primary px-10 py-4 rounded-xl font-semibold text-lg"
           >
             {isSoloMode ? "Start Challenge →" : "Create Multiplayer Room →"}
           </button>
           <button 
             onClick={() => setPhase('mode-selection')} 
-            className="text-gray-500 font-bold hover:text-white transition-colors"
+            className="btn-link"
           >
             ← Back to Mode
           </button>
@@ -630,30 +632,30 @@ const ReasoningChallenge: React.FC = () => {
     const inviteUrl = `${window.location.origin}${window.location.pathname}?roomId=${session.roomCode}`;
     
     return (
-      <div className="max-w-3xl mx-auto py-12 px-6 animate-fade-in">
-        <div className="glass rounded-[40px] p-12 border-2 border-white/5 text-center mb-8 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 animate-gradient-x" />
-          <h2 className="text-sm font-black text-purple-500 uppercase tracking-[0.4em] mb-4">Live Challenge Room</h2>
+      <div className="max-w-3xl mx-auto py-6 md:py-10 animate-fade-in">
+        <div className="surface rounded-2xl p-6 md:p-12 text-center mb-8 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-cardinal" aria-hidden="true" />
+          <h2 className="eyebrow mb-4">Live Challenge Room</h2>
           
           {!isSoloMode && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12 mt-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10 mt-6">
               {/* Room Code Box */}
-              <div className="p-8 rounded-[2rem] bg-white/[0.03] border border-white/5 flex flex-col items-center gap-2">
-                 <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Room Code</span>
-                 <span className="text-5xl font-black text-white tracking-widest leading-none mb-4">{session.roomCode}</span>
-                 <button onClick={copyRoomCode} className="px-6 py-2 bg-white/5 hover:bg-white/10 rounded-full text-xs font-bold text-white transition-all flex items-center gap-2">
+              <div className="p-6 md:p-8 rounded-xl bg-canvas border border-line flex flex-col items-center gap-2">
+                 <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Room Code</span>
+                 <span className="text-4xl md:text-5xl font-extrabold text-cardinal tracking-widest leading-none mb-4">{session.roomCode}</span>
+                 <button onClick={copyRoomCode} className="btn-secondary px-5 py-2 rounded-full text-xs font-semibold">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                     Copy Code
                  </button>
               </div>
               
               {/* Invite Link Box */}
-              <div className="p-8 rounded-[2rem] bg-white/[0.03] border border-white/5 flex flex-col items-center gap-2 overflow-hidden">
-                 <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Invite Link</span>
-                 <div className="w-full truncate text-xs text-gray-400 font-mono bg-black/20 p-3 rounded-xl mb-4 border border-white/5">
+              <div className="p-6 md:p-8 rounded-xl bg-canvas border border-line flex flex-col items-center gap-2 overflow-hidden">
+                 <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Invite Link</span>
+                 <div className="w-full truncate text-xs text-muted font-mono bg-surface p-3 rounded-lg mb-4 border border-line">
                     {inviteUrl}
                  </div>
-                 <button onClick={copyInviteLink} className="px-6 py-2 bg-purple-500 text-white rounded-full text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-purple-500/20">
+                 <button onClick={copyInviteLink} className="btn-primary px-5 py-2 rounded-full text-xs font-semibold">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                     Copy Invite Link
                  </button>
@@ -661,45 +663,45 @@ const ReasoningChallenge: React.FC = () => {
             </div>
           )}
           
-          <div className="space-y-4 mb-12 max-w-sm mx-auto">
-            <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">{isSoloMode ? "Competitors" : `Joined Players (${players.length})`}</h3>
+          <div className="space-y-4 mb-10 max-w-sm mx-auto">
+            <h3 className="text-xs font-bold text-muted uppercase tracking-widest">{isSoloMode ? "Competitors" : `Joined Players (${players.length})`}</h3>
             <div className="grid gap-3">
               {players.map((p, i) => (
-                <div key={p.uid || i} className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${p.uid === USER_ID ? 'bg-white/[0.06] border-white/10 shadow-lg' : 'bg-white/[0.03] border-white/5'}`}>
+                <div key={p.uid || i} className={`p-4 rounded-xl border flex items-center justify-between ${p.uid === USER_ID ? 'bg-cardinal-soft border-cardinal/30' : 'bg-surface border-line'}`}>
                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${p.isHost ? 'bg-purple-500/20 text-purple-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${p.isHost ? 'bg-cardinal text-gold' : 'bg-success-soft text-success'}`}>
                         {p.name ? p.name[0] : '?'}
                       </div>
                       <div className="flex flex-col">
-                        <span className="font-bold text-white text-sm">
+                        <span className="font-bold text-ink text-sm">
                           {p.name} {p.uid === USER_ID && "(You)"}
                         </span>
-                        {p.isHost && <span className="text-[10px] font-black text-purple-500 uppercase tracking-widest">Room Host</span>}
+                        {p.isHost && <span className="text-[10px] font-bold text-cardinal uppercase tracking-widest">Room Host</span>}
                       </div>
                    </div>
                    {p.status === 'finished' && (
-                     <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-black uppercase">Ready</span>
+                     <span className="px-2 py-0.5 rounded-full bg-success-soft text-success text-[10px] font-bold uppercase">Ready</span>
                    )}
                 </div>
               ))}
               {isSoloMode && (
-                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between animate-pulse">
+                <div className="p-4 rounded-xl bg-gold-soft border border-gold/60 flex items-center justify-between">
                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold text-xs">C</div>
-                      <span className="font-bold text-white">Claude AI (Grandmaster)</span>
+                      <div className="w-8 h-8 rounded-full bg-gold flex items-center justify-center text-ink font-bold text-xs">C</div>
+                      <span className="font-bold text-ink">Claude AI (Grandmaster)</span>
                    </div>
-                   <span className="text-[10px] font-black text-amber-500 uppercase">Opponent</span>
+                   <span className="text-[10px] font-bold text-gold-ink uppercase">Opponent</span>
                 </div>
               )}
             </div>
           </div>
 
           {isHost ? (
-            <button onClick={handleStartChallenge} className="btn-premium px-12 py-5 rounded-2xl font-black text-xl shadow-2xl w-full">
+            <button onClick={handleStartChallenge} className="btn-primary px-10 py-4 rounded-xl font-semibold text-lg w-full">
                {isSoloMode ? "Start Solo Challenge" : (players.length === 1 ? "Start vs Claude AI" : "Start Live Challenge")}
             </button>
           ) : (
-            <div className="p-6 bg-white/5 rounded-3xl text-gray-500 font-bold animate-pulse border border-white/5">
+            <div className="p-5 bg-canvas rounded-xl text-muted font-semibold border border-line">
                 Waiting for host to start the arena...
             </div>
           )}
@@ -710,12 +712,12 @@ const ReasoningChallenge: React.FC = () => {
 
   if (phase === 'loading') {
     return (
-      <div className="max-w-md mx-auto py-32 text-center animate-fade-in">
-        <div className="relative w-24 h-24 mx-auto mb-12">
-          <div className="absolute inset-0 rounded-full border-4 border-purple-500/10" />
-          <div className="absolute inset-0 rounded-full border-4 border-purple-500 border-t-transparent animate-spin" />
+      <div className="max-w-md mx-auto py-24 text-center animate-fade-in" role="status" aria-live="polite">
+        <div className="relative w-16 h-16 mx-auto mb-8">
+          <div className="absolute inset-0 rounded-full border-4 border-line" />
+          <div className="absolute inset-0 rounded-full border-4 border-cardinal border-t-transparent animate-spin" />
         </div>
-        {loadingStep === 'competitor' && <p className="text-gray-500 text-sm mt-4 italic">Waiting for other participants to finish...</p>}
+        {loadingStep === 'competitor' && <p className="text-muted text-sm mt-4 italic">Waiting for other participants to finish...</p>}
       </div>
     );
   }
@@ -723,15 +725,15 @@ const ReasoningChallenge: React.FC = () => {
   if (phase === 'quiz' && currentQuiz) {
     const q = currentQuiz[currentQuestionIndex];
     return (
-      <div className="max-w-4xl mx-auto py-12 px-6">
-        <div className="mb-12 flex items-center justify-between">
+      <div className="max-w-4xl mx-auto py-6 md:py-10">
+        <div className="mb-8 surface rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
            <div>
-             <h2 className="text-xl font-black">Question {currentQuestionIndex + 1} of {currentQuiz.length}</h2>
-             <span className="text-xs font-bold text-gray-500">{timeLeft}s remaining</span>
+             <h2 className="text-base md:text-lg font-bold text-ink">Question {currentQuestionIndex + 1} of {currentQuiz.length}</h2>
+             <span className="text-xs font-semibold text-muted tabular-nums">{timeLeft}s remaining</span>
            </div>
-           <div className="w-48 h-3 bg-white/10 rounded-full overflow-hidden border border-white/5 ring-1 ring-purple-500/20 shadow-inner">
+           <div className="w-full sm:w-56 h-2 bg-sunken rounded-full overflow-hidden" role="progressbar" aria-label="Time remaining" aria-valuemin={0} aria-valuemax={TIME_PER_QUESTION} aria-valuenow={timeLeft}>
              <div 
-               className={`h-full bg-gradient-to-r from-purple-500 to-pink-500 ease-linear shadow-[0_0_15px_rgba(168,85,247,0.4)] ${timeLeft === TIME_PER_QUESTION ? 'transition-none' : 'transition-all duration-1000'}`} 
+               className={`h-full bg-cardinal rounded-full ease-linear ${timeLeft === TIME_PER_QUESTION ? 'transition-none' : 'transition-all duration-1000'}`} 
                style={{ width: `${(timeLeft / TIME_PER_QUESTION) * 100}%` }} 
              />
            </div>
@@ -752,42 +754,42 @@ const ReasoningChallenge: React.FC = () => {
     const winner = hasAnyPoints ? leaderboard[0] : null;
 
     return (
-      <div className="max-w-5xl mx-auto py-12 px-6 animate-slide-up">
+      <div className="max-w-5xl mx-auto py-6 md:py-10 animate-slide-up">
         {/* Winner Announcement */}
-        <div className="text-center mb-16">
-          <div className={`w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border-2 rotate-12 shadow-2xl ${winner ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400 shadow-yellow-500/10' : 'bg-gray-500/10 border-white/10 text-gray-400 shadow-white/5'}`}>
+        <div className="text-center mb-12">
+          <div className={`w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-6 border ${winner ? 'bg-gold border-gold text-ink' : 'bg-sunken border-line text-muted'}`}>
             {winner ? (
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" aria-hidden="true"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
             ) : (
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             )}
           </div>
-          <h2 className="text-6xl font-black text-white tracking-tighter mb-2">
+          <h2 className="text-4xl md:text-6xl font-extrabold text-ink tracking-tight mb-3">
             {!hasAnyPoints ? "No One Won! 😅" : (winner?.uid === USER_ID ? "Victory! 🏆" : (winner?.uid === 'claude_ai' ? "Claude AI Wins! 🤖" : `${winner?.name || 'Player'} Wins!`))}
           </h2>
-          <p className="text-gray-500 font-bold text-xl">{!hasAnyPoints ? "Everyone finished with 0 pts. Practice makes perfect!" : (session?.claudeCompetitor ? "Against the Grandmaster Claude AI" : "Live Challenge Comparison")}</p>
-          {savedAttemptId && <p className="text-xs text-purple-500 font-bold mt-2 uppercase tracking-widest">Attempt Saved: {savedAttemptId}</p>}
+          <p className="text-muted font-medium text-lg">{!hasAnyPoints ? "Everyone finished with 0 pts. Practice makes perfect!" : (session?.claudeCompetitor ? "Against the Grandmaster Claude AI" : "Live Challenge Comparison")}</p>
+          {savedAttemptId && <p className="text-xs text-muted font-semibold mt-3 uppercase tracking-wider">Attempt Saved: {savedAttemptId}</p>}
         </div>
 
         {/* Leaderboard */}
         {session && (
-          <div className="glass rounded-[40px] p-8 border-2 border-white/5 mb-16 shadow-2xl">
-            <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-8 text-center">Global Podium</h3>
-            <div className="grid gap-4">
+          <div className="surface rounded-2xl p-5 md:p-8 mb-12">
+            <h3 className="eyebrow mb-6 text-center">Global Podium</h3>
+            <div className="grid gap-3">
               {leaderboard.map((p, i) => (
                 <div 
                   key={i} 
-                  className={`p-6 rounded-3xl border-2 transition-all flex items-center justify-between ${p.uid === USER_ID ? 'border-purple-500 bg-purple-500/10' : (p.uid === 'claude_ai' ? 'border-amber-500/20 bg-amber-500/5' : 'border-white/5 bg-white/[0.02]')}`}
+                  className={`p-4 md:p-6 rounded-xl border flex items-center justify-between gap-4 ${p.uid === USER_ID ? 'border-cardinal bg-cardinal-soft' : (p.uid === 'claude_ai' ? 'border-gold/60 bg-gold-soft' : 'border-line bg-surface')}`}
                 >
-                  <div className="flex items-center gap-6">
-                    <span className="text-4xl font-black text-gray-600 w-10">#{i + 1}</span>
+                  <div className="flex items-center gap-4 md:gap-6 min-w-0">
+                    <span className={`text-2xl md:text-4xl font-extrabold w-10 shrink-0 ${i === 0 ? 'text-gold-ink' : 'text-muted'}`}>#{i + 1}</span>
                     <div>
-                      <h4 className="text-xl font-black text-white">{p.name}</h4>
-                      <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">{p.results?.accuracy}% Accuracy &bull; {p.results?.correctCount} Correct</span>
+                      <h4 className="text-lg md:text-xl font-bold text-ink truncate">{p.name}</h4>
+                      <span className="text-xs font-semibold text-muted uppercase tracking-wider">{p.results?.accuracy}% Accuracy &bull; {p.results?.correctCount} Correct</span>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-3xl font-black text-white">{p.results?.score || 0} pts</div>
+                    <div className="text-xl md:text-3xl font-extrabold text-ink whitespace-nowrap">{p.results?.score || 0} pts</div>
                   </div>
                 </div>
               ))}
@@ -796,42 +798,44 @@ const ReasoningChallenge: React.FC = () => {
         )}
 
         {/* Individual Review Toggles */}
-        <div className="flex items-center justify-center gap-2 mb-10 overflow-x-auto pb-4">
+        <div className="flex items-center justify-center gap-2 mb-8 overflow-x-auto pb-2" role="tablist" aria-label="Review results by player">
            {session ? leaderboard.map(p => (
              <button 
                key={p.uid} 
                onClick={() => setActiveReviewPlayer(p.uid)}
-               className={`px-6 py-3 rounded-2xl font-black text-sm transition-all whitespace-nowrap ${activeReviewPlayer === p.uid ? 'bg-white text-black shadow-xl ring-2 ring-purple-500' : 'bg-white/5 text-gray-500 hover:text-white'}`}
+               role="tab"
+               aria-selected={activeReviewPlayer === p.uid}
+               className={`px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors whitespace-nowrap border cursor-pointer ${activeReviewPlayer === p.uid ? 'bg-cardinal border-cardinal text-white' : 'bg-surface border-line text-muted hover:text-cardinal hover:border-cardinal/40'}`}
              >
                {p.name} Review
              </button>
            )) : (
-             <button className="bg-white text-black px-6 py-3 rounded-2xl font-black text-sm">Your Results</button>
+             <button className="bg-cardinal text-white border border-cardinal px-5 py-2.5 rounded-lg font-semibold text-sm">Your Results</button>
            )}
         </div>
 
         {/* Per Player List */}
-        <div className="space-y-6 mb-20 animate-fade-in" key={activeReviewPlayer}>
+        <div className="space-y-4 mb-14 animate-fade-in" key={activeReviewPlayer}>
            {(session ? session.questions : currentQuiz!).map((q, idx) => {
              const userAns = session ? session.participants[activeReviewPlayer]?.results?.answers[q.id] : results[idx]?.userAnswer;
              const isCorrect = session ? (userAns === q.correctAnswer) : results[idx]?.isCorrect;
 
              return (
-               <div key={idx} className={`glass rounded-3xl p-8 border-2 ${isCorrect ? 'border-emerald-500/10' : 'border-red-500/10'}`}>
+               <div key={idx} className={`surface rounded-2xl p-5 md:p-7 border-l-4 ${isCorrect ? 'border-l-success' : 'border-l-danger'}`}>
                  <div className="flex items-start justify-between gap-4 mb-4">
-                    <h4 className="text-xl font-semibold text-white">{q.question}</h4>
-                    <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${isCorrect ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                    <h4 className="text-base md:text-lg font-semibold text-ink">{q.question}</h4>
+                    <span className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${isCorrect ? 'bg-success-soft text-success border-success/25' : 'bg-danger-soft text-danger border-danger/25'}`}>
                       {isCorrect ? 'Correct' : 'Incorrect'}
                     </span>
                  </div>
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm font-bold mb-4">
-                    <div className="p-4 rounded-2xl bg-white/5">
-                       <p className="text-gray-500 uppercase text-[10px] mb-2">{activeReviewPlayer === USER_ID ? "Your Answer" : `${session?.participants[activeReviewPlayer]?.name || 'Player'}'s Answer`}</p>
-                       <p className={isCorrect ? 'text-emerald-400' : 'text-red-400'}>{userAns || "Missing"}</p>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm font-semibold">
+                    <div className="p-4 rounded-xl bg-canvas border border-line">
+                       <p className="text-muted uppercase tracking-wider text-[10px] mb-2">{activeReviewPlayer === USER_ID ? "Your Answer" : `${session?.participants[activeReviewPlayer]?.name || 'Player'}'s Answer`}</p>
+                       <p className={isCorrect ? 'text-success' : 'text-danger'}>{userAns || "Missing"}</p>
                     </div>
-                    <div className="p-4 rounded-2xl bg-white/5">
-                       <p className="text-gray-500 uppercase text-[10px] mb-2">Ideal Answer</p>
-                       <p className="text-white">{q.correctAnswer}</p>
+                    <div className="p-4 rounded-xl bg-canvas border border-line">
+                       <p className="text-muted uppercase tracking-wider text-[10px] mb-2">Ideal Answer</p>
+                       <p className="text-ink">{q.correctAnswer}</p>
                     </div>
                  </div>
                </div>
@@ -839,9 +843,9 @@ const ReasoningChallenge: React.FC = () => {
            })}
         </div>
 
-        <div className="flex flex-col md:flex-row items-center justify-center gap-6">
-          <button onClick={() => window.location.href = '/'} className="btn-outline px-12 py-5 rounded-2xl font-black text-lg w-full md:w-auto">Return Home</button>
-          <button onClick={() => { setPhase('selection'); setSelectedDocIds(new Set()); setResults([]); setQuiz([]); setSavedAttemptId(null); }} className="btn-premium px-12 py-5 rounded-2xl font-black text-xl shadow-2xl shadow-purple-500/30 w-full md:w-auto">New Challenge →</button>
+        <div className="flex flex-col md:flex-row items-center justify-center gap-3">
+          <button onClick={() => window.location.href = '/'} className="btn-secondary px-10 py-4 rounded-xl font-semibold text-base w-full md:w-auto">Return Home</button>
+          <button onClick={() => { setPhase('selection'); setSelectedDocIds(new Set()); setResults([]); setQuiz([]); setSavedAttemptId(null); }} className="btn-primary px-10 py-4 rounded-xl font-semibold text-base w-full md:w-auto">New Challenge →</button>
         </div>
       </div>
     );
@@ -849,25 +853,25 @@ const ReasoningChallenge: React.FC = () => {
 
   if (phase === 'generation-error') {
     return (
-      <div className="max-w-2xl mx-auto py-20 px-6 text-center animate-fade-in">
-        <div className="w-20 h-20 bg-red-500/10 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border-2 border-red-500/20 text-red-400 rotate-12 shadow-2xl shadow-red-500/10">
+      <div className="max-w-2xl mx-auto py-14 md:py-20 text-center animate-fade-in">
+        <div className="w-20 h-20 bg-danger-soft rounded-2xl flex items-center justify-center mx-auto mb-8 border border-danger/20 text-danger">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
         </div>
-        <h2 className="text-3xl font-black mb-4 text-white">AI Generation Failed</h2>
-        <div className="p-4 rounded-2xl bg-white/5 border border-white/10 mb-8 text-sm text-gray-400 font-mono italic">
+        <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight mb-4 text-ink">AI Generation Failed</h2>
+        <div className="p-4 rounded-xl bg-surface border border-line mb-8 text-sm text-muted font-mono break-words" role="alert">
           "{generationError || "Unknown connection error"}"
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           <button 
             onClick={handleStartChallenge} 
-            className="btn-premium px-8 py-4 rounded-2xl font-black text-lg transition-all"
+            className="btn-primary px-8 py-4 rounded-xl font-semibold text-base"
           >
             Retry AI Generation
           </button>
           <button 
             onClick={handleUseFallback} 
-            className="bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 px-8 py-4 rounded-2xl font-black text-lg transition-all"
+            className="btn-secondary px-8 py-4 rounded-xl font-semibold text-base"
           >
             Use Fallback Quiz (Instant)
           </button>
@@ -875,7 +879,7 @@ const ReasoningChallenge: React.FC = () => {
         
         <button 
           onClick={() => setPhase('selection')} 
-          className="text-gray-500 font-bold hover:text-white transition-colors"
+          className="btn-link"
         >
           ← Back to Setup
         </button>

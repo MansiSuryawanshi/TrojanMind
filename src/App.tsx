@@ -13,6 +13,7 @@ import { useStore } from './store/store';
 import UploadMaterial from './components/UploadMaterial';
 import { saveDocument } from './services/firebaseService';
 import { InitialDataLoader } from './components/InitialDataLoader';
+import MyCourses from './components/MyCourses';
 import './index.css';
 
 const DEMO_SESSION = {
@@ -83,7 +84,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#070714] text-white selection:bg-purple-500/30 selection:text-white">
+    <div className="min-h-screen bg-canvas text-ink">
       <InitialDataLoader />
       <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
       <main>
@@ -94,13 +95,20 @@ const App: React.FC = () => {
             <HowItWorks />
             <WhyDifferent />
             <FinalCTA onUpload={goToUpload} />
-            <footer className="py-12 border-t border-white/5 text-center text-gray-600 font-bold text-xs uppercase tracking-widest">
-              StudyBuddy &copy; 2026 &bull; Smart AI Study Companion
+            <footer className="py-10 px-4 border-t border-line bg-surface">
+              <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-muted">
+                <div className="flex items-center gap-2">
+                  <span className="brand-mark w-7 h-7 text-[11px] rounded-md" aria-hidden="true">TM</span>
+                  <span className="font-semibold text-ink">TrojanMind</span>
+                  <span>&copy; 2026</span>
+                </div>
+                <span>Learn together. Reason deeper.</span>
+              </div>
             </footer>
           </div>
         )}
         {activeTab === 1 && (
-          <div className="container mx-auto px-6 py-12">
+          <div className="container mx-auto px-4 sm:px-6 py-10">
             <UploadMaterial 
               content={uploadedContent} 
               onContentChange={setUploadedContent} 
@@ -110,7 +118,7 @@ const App: React.FC = () => {
           </div>
         )}
         {activeTab === 2 && (
-          <div className="container mx-auto px-6 py-8 animate-fade-in">
+          <div className="container mx-auto px-4 sm:px-6 py-6 animate-fade-in">
             <ReasoningChallenge key={challengeSessionKey} />
           </div>
         )}
@@ -121,6 +129,7 @@ const App: React.FC = () => {
         )}
         {activeTab === 4 && <StudySchedule onSwitchToChallenge={() => setActiveTab(2)} />}
         {activeTab === 5 && <StudyReport />}
+        {activeTab === 6 && <MyCourses />}
       </main>
     </div>
   );

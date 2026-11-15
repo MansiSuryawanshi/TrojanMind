@@ -1,5 +1,5 @@
 /**
- * StudyBuddy Content Quality Service — cleans and validates study material.
+ * TrojanMind Content Quality Service — cleans and validates study material.
  */
 
 const PLACEHOLDER_PATTERN = /\[Parsing Content from.*?\]/gi;

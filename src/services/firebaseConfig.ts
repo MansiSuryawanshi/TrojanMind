@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
 const REQUIRED_VITE_VARS = [
   "VITE_FIREBASE_API_KEY",
@@ -30,5 +31,15 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:000000000000:web:dummy"
 };
 
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
+
+/** True only when every Firebase env var is set (i.e. we are not on dummy keys). */
+export const isFirebaseConfigured = missingVars.length === 0;
+
+/**
+ * Firebase Authentication. In the browser, getAuth() defaults to local
+ * (IndexedDB) persistence, so the signed-in session survives page reloads.
+ * Firebase manages tokens itself — we never store passwords or tokens.
+ */
+export const auth = getAuth(app);
