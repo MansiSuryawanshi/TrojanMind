@@ -30,11 +30,11 @@ const FEATURES: Feature[] = [
       'Browse your Brightspace courses, open each course’s modules, and pick out the materials you want to keep together.',
     points: [
       'Courses grouped by semester',
-      'Select items module by module',
+      'Import Brightspace files and HTML pages into a durable workspace',
       'Prefer your own notes? Paste text or upload a PDF or .txt file',
     ],
     note:
-      'Brightspace selections are saved as reference links for this session and aren’t imported into challenges. Linked files, Drive items, or recordings may require separate access.',
+      'Supported Brightspace files and pages are imported into My Materials for Summary, Challenge, and Exam Prep. Google Drive, recordings, and external LTI links stay as references only. Files over 10 MB need a manual download + upload.',
     cta: { label: 'Browse My Courses', tab: HOME_TABS.courses },
     secondary: { label: 'Upload materials instead', tab: HOME_TABS.upload, icon: Upload },
     span: 'md:col-span-2 lg:col-span-3',
@@ -45,7 +45,7 @@ const FEATURES: Feature[] = [
     icon: Swords,
     tone: 'cardinal',
     description:
-      'Turn your uploaded material into a timed question set, then go head-to-head with Claude or with classmates in a live room.',
+      'Turn your study material into a timed question set, then go head-to-head with Claude or with classmates in a live room.',
     points: [
       'Solo vs Claude, or a multiplayer room shared by code or invite link',
       '5, 10, 20, or 50 questions, 60 seconds each',

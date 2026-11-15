@@ -37,6 +37,8 @@ import {
 } from '../services/piazzaFirebase';
 import { syncPiazzaCourse } from '../services/piazzaSync';
 import { askPiazzaQuestion } from '../services/piazzaAsk';
+import { getDocumentById } from '../services/firebaseService';
+import { getWorkspace } from '../services/workspaceService';
 import type {
   PiazzaAskMessage,
   PiazzaClass,
@@ -48,6 +50,12 @@ import type {
 type Tab = 'updates' | 'discussions' | 'ask';
 
 const POLL_MS = 3 * 60 * 1000;
+
+const ASK_SUGGESTIONS = [
+  'Who is the TA / what are office hours?',
+  'Any recent deadline or exam announcements?',
+  'What did the instructor clarify recently?',
+];
 
 function formatWhen(iso: string | null): string {
   if (!iso) return '';
@@ -98,6 +106,8 @@ const PiazzaAssistant: React.FC = () => {
   const [expanded, setExpanded] = useState<PiazzaPostDetail | null>(null);
   const [askHistory, setAskHistory] = useState<PiazzaAskMessage[]>([]);
   const [askInput, setAskInput] = useState('');
+  const [studyExcerpt, setStudyExcerpt] = useState<string | null>(null);
+  const [studyGrounded, setStudyGrounded] = useState(false);
   const [askBusy, setAskBusy] = useState(false);
   const [mapHint, setMapHint] = useState<string | null>(null);
 
@@ -193,6 +203,47 @@ const PiazzaAssistant: React.FC = () => {
       }
     })();
   }, [studyCourse?.brightspaceCourseId, studyCourse?.courseCode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Soft-ground Ask AI with an excerpt from the open My Materials workspace.
+  useEffect(() => {
+    let cancelled = false;
+    const workspaceId = studyCourse?.workspaceId;
+    if (!workspaceId) {
+      setStudyExcerpt(null);
+      setStudyGrounded(false);
+      return;
+    }
+    void (async () => {
+      try {
+        const ws = await getWorkspace(workspaceId);
+        if (!ws?.studyDocumentId) {
+          if (!cancelled) {
+            setStudyExcerpt(null);
+            setStudyGrounded(false);
+          }
+          return;
+        }
+        const doc = await getDocumentById(ws.studyDocumentId);
+        const raw = doc?.rawText?.trim() ?? '';
+        if (cancelled) return;
+        if (!raw) {
+          setStudyExcerpt(null);
+          setStudyGrounded(false);
+          return;
+        }
+        setStudyExcerpt(raw.slice(0, 2500));
+        setStudyGrounded(true);
+      } catch {
+        if (!cancelled) {
+          setStudyExcerpt(null);
+          setStudyGrounded(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [studyCourse?.workspaceId]);
 
   const runSync = useCallback(async () => {
     if (!selected) return;
@@ -355,16 +406,17 @@ const PiazzaAssistant: React.FC = () => {
     openPiazzaUrl(n.verifiedSourceUrl, n.courseId);
   };
 
-  const sendAsk = async () => {
-    if (!selected || !askInput.trim() || askBusy) return;
-    const q = askInput.trim();
+  const sendAsk = async (preset?: string) => {
+    if (!selected || askBusy) return;
+    const q = (preset ?? askInput).trim();
+    if (!q) return;
     setAskInput('');
     const userMsg: PiazzaAskMessage = { role: 'user', content: q, at: new Date().toISOString() };
     setAskHistory((h) => [...h, userMsg]);
     setAskBusy(true);
     try {
       const label = selected.courseNumber ? `${selected.courseNumber} — ${selected.name}` : selected.name;
-      const result = await askPiazzaQuestion(selected.id, label, q, askHistory);
+      const result = await askPiazzaQuestion(selected.id, label, q, askHistory, studyExcerpt);
       setAskHistory((h) => [
         ...h,
         {
@@ -643,9 +695,31 @@ const PiazzaAssistant: React.FC = () => {
               <div className="flex h-full min-h-[280px] flex-col">
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
                   {askHistory.length === 0 && (
-                    <p className="text-sm text-muted">
-                      Ask about discussions in the selected Piazza class. Answers cite authorized posts only.
-                    </p>
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted">
+                        Ask about discussions in the selected Piazza class. Answers cite authorized posts only
+                        {studyGrounded ? ', and can use your open course materials when helpful' : ''}.
+                      </p>
+                      {studyGrounded && (
+                        <p className="inline-flex items-center gap-1.5 rounded-lg border border-gold/40 bg-gold/10 px-2.5 py-1.5 text-[11px] font-medium text-ink">
+                          <BookOpen className="h-3.5 w-3.5 text-cardinal" />
+                          Grounded with your open My Materials workspace
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {ASK_SUGGESTIONS.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            className="rounded-full border border-line bg-canvas px-3 py-1.5 text-left text-xs text-ink hover:border-line-strong hover:bg-sunken disabled:opacity-50"
+                            disabled={!selected || askBusy}
+                            onClick={() => void sendAsk(s)}
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
                   {askHistory.map((m, i) => (
                     <div

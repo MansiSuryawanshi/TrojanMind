@@ -36,11 +36,13 @@ export const InitialDataLoader: React.FC = () => {
           console.log(`Exam Date Sync: ${dateStr}`);
         }
 
-        setInitialLoadComplete(true);
         console.log("Initial Load Success.");
       } catch (err) {
         console.error("Hydration failed:", err);
       } finally {
+        // Always clear the loading gate so Exam Prep / Schedule don't spin forever
+        // if Firebase hydration throws.
+        setInitialLoadComplete(true);
         console.groupEnd();
       }
     };
