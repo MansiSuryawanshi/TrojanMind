@@ -8,6 +8,7 @@
     "dev:client": "vite",
     "server": "node --env-file-if-exists=server/.env.local server/index.ts",
     "build": "tsc -b && vite build",
+    "typecheck:server": "tsc -p tsconfig.server.json",
     "lint": "eslint .",
     "preview": "vite preview"
   },
