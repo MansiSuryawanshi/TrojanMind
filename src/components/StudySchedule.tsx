@@ -5,6 +5,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { ScheduleResponse } from '../types';
 import { useStore } from '../store/store';
 import { generateSchedule } from '../services/claudeService';
+import { listRevisionTasks } from '../services/firebaseService';
 import { MetricsRow } from './MetricsRow';
 import { DayScheduleCard } from './DayScheduleCard';
 
@@ -21,6 +22,8 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
   const daysLeft    = useStore((s) => s.daysLeft);
   const allAttempts = useStore((s) => s.allAttempts);
   const isInitialLoadComplete = useStore((s) => s.isInitialLoadComplete);
+  const revisionTasks = useStore((s) => s.revisionTasks);
+  const setRevisionTasks = useStore((s) => s.setRevisionTasks);
 
   const [localSchedule, setLocalSchedule] = useState<ScheduleResponse | null>(cachedSchedule);
   const [loading, setLoading] = useState(false);
@@ -34,6 +37,17 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
 
   const prevGapCount = useRef(0);
   const prevExamDate = useRef<string | null>(examDate);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const tasks = await listRevisionTasks();
+        setRevisionTasks(tasks);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [setRevisionTasks]);
 
   // Reactive Logic: Monitor store for new history or new exam date
   useEffect(() => {
@@ -133,13 +147,13 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
   }
 
   // ── Empty state ──────────────────────────────────────────────────────────
-  if (allAttempts.length === 0 && localSchedule === null) {
+  if (allAttempts.length === 0 && localSchedule === null && revisionTasks.length === 0) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center px-4 text-center">
         <div className="animate-slide-up surface rounded-2xl px-6 py-12 md:px-12 max-w-lg w-full">
           <div className="text-5xl mb-6">📅</div>
           <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink mb-3">No Plan Yet</h2>
-          <p className="text-muted mb-8 max-w-sm mx-auto">Complete a challenge to unlock your personalized adaptive study plan.</p>
+          <p className="text-muted mb-8 max-w-sm mx-auto">Complete a challenge or add a topic from Summary to unlock your plan.</p>
           <button onClick={onSwitchToChallenge} className="btn-primary px-8 py-3.5 rounded-xl font-semibold">Start a Challenge →</button>
         </div>
       </div>
@@ -178,6 +192,29 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
       )}
 
       <MetricsRow challengesDone={allAttempts.length} avgScore={avgScore} gapsCount={conceptGaps.length} />
+
+      {revisionTasks.length > 0 && (
+        <div className="mb-8 mt-6 surface rounded-2xl border border-line p-5">
+          <h2 className="text-lg font-extrabold text-ink mb-3">Revision tasks from Summary / Exam Prep</h2>
+          <div className="space-y-2">
+            {revisionTasks.map((t) => (
+              <div
+                key={t.id || `${t.topic}-${t.date}`}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-4 py-3 text-sm bg-sunken"
+              >
+                <div>
+                  <div className="font-bold text-ink">{t.topic}</div>
+                  <div className="text-xs text-muted">
+                    {t.date} · {t.durationMinutes} min
+                    {t.fileName ? ` · ${t.fileName}` : ''}
+                    {t.source ? ` · via ${t.source}` : ''}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Loading */}
       {loading && (

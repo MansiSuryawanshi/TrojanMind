@@ -9,9 +9,11 @@ import ReasoningChallenge from './components/ReasoningChallenge';
 import { StudySchedule } from './components/StudySchedule';
 import { StudyReport } from './components/StudyReport';
 import { ExamPrep } from './components/ExamPrep';
+import { Summary } from './components/Summary';
 import { useStore } from './store/store';
 import UploadMaterial from './components/UploadMaterial';
 import { saveDocument } from './services/firebaseService';
+import type { SaveDocumentMeta } from './services/firebaseService';
 import { InitialDataLoader } from './components/InitialDataLoader';
 import MyCourses from './components/MyCourses';
 import './index.css';
@@ -36,6 +38,7 @@ const DEMO_SESSION = {
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<number>(0);
   const [uploadedContent, setUploadedContent] = useState<string>('');
+  const [uploadMeta, setUploadMeta] = useState<SaveDocumentMeta>({});
   const setSession = useStore((state) => state.setSession);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [challengeSessionKey, setChallengeSessionKey] = useState<number>(0);
@@ -43,10 +46,10 @@ const App: React.FC = () => {
   useEffect(() => { 
     setSession(DEMO_SESSION); 
 
-    // Handle deep link to challenge room
+    // Challenge is tab 3 after Summary insert
     const params = new URLSearchParams(window.location.search);
     if (params.get('roomId') || params.get('roomCode')) {
-      setActiveTab(2);
+      setActiveTab(HOME_TABS.challenge);
     }
   }, [setSession]);
 
@@ -65,21 +68,20 @@ const App: React.FC = () => {
     document.getElementById('features-title')?.focus({ preventScroll: true });
   };
 
-  const handleStartChallenge = async (fileName: string = "Manual Upload") => {
+  const persistUpload = async (fileName: string, nextTab: number) => {
     if (!uploadedContent.trim()) {
-      console.warn("[App-Step.Abort] Cannot start challenge: uploadedContent is empty.");
+      console.warn("[App-Step.Abort] Cannot save: uploadedContent is empty.");
       return;
     }
-    
+
     console.group(`[App-Upload-Pipeline] Started for: ${fileName}`);
     setIsSaving(true);
     try {
       console.log(`[App-Step 1] Initializing Firestore write...`);
-      const docId = await saveDocument(fileName, uploadedContent);
-      console.log(`[App-Step 2] Firebase success! Document ID: ${docId}. Navigating to Challenge arena...`);
-      
-      setChallengeSessionKey(prev => prev + 1); // Force Challenge reload
-      setActiveTab(2);
+      const docId = await saveDocument(fileName, uploadedContent, uploadMeta);
+      console.log(`[App-Step 2] Firebase success! Document ID: ${docId}. Navigating to tab ${nextTab}...`);
+      if (nextTab === HOME_TABS.challenge) setChallengeSessionKey((prev) => prev + 1);
+      setActiveTab(nextTab);
       console.log(`[App-Step 3] Navigation triggered.`);
       console.groupEnd();
     } catch (error: any) {
@@ -95,13 +97,27 @@ const App: React.FC = () => {
       console.log(`[App-Lifecycle] Upload state reset. (isSaving=false)`);
     }
   };
+  
+  const handleStartChallenge = async (fileName: string = "Manual Upload") => {
+    await persistUpload(fileName, HOME_TABS.challenge);
+  };
+
+  const handleSaveForSummary = async (fileName: string = "Manual Upload") => {
+    await persistUpload(fileName, HOME_TABS.summary);
+  };
+
+  const handleContentChange = (content: string, meta?: SaveDocumentMeta) => {
+    setUploadedContent(content);
+    if (meta) setUploadMeta(meta);
+    else if (!content.trim()) setUploadMeta({});
+  };
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <InitialDataLoader />
       <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
       <main>
-        {activeTab === 0 && (
+        {activeTab === HOME_TABS.home && (
           <div className="animate-fade-in">
             {/* "Get Started" mirrors the navbar's Get Started (Upload tab). */}
             <Hero onGetStarted={() => navigateFromHome(HOME_TABS.upload)} onExploreFeatures={exploreFeatures} />
@@ -123,29 +139,39 @@ const App: React.FC = () => {
             </footer>
           </div>
         )}
-        {activeTab === 1 && (
+        {activeTab === HOME_TABS.upload && (
           <div className="container mx-auto px-4 sm:px-6 py-10">
             <UploadMaterial 
               content={uploadedContent} 
-              onContentChange={setUploadedContent} 
-              onStart={handleStartChallenge} 
+              onContentChange={handleContentChange} 
+              onStart={handleStartChallenge}
+              onSaveForSummary={handleSaveForSummary}
               isSaving={isSaving} 
             />
           </div>
         )}
-        {activeTab === 2 && (
+        {activeTab === HOME_TABS.summary && (
+          <Summary
+            onGoToExamPrep={() => setActiveTab(HOME_TABS.examPrep)}
+            onGoToSchedule={() => setActiveTab(HOME_TABS.schedule)}
+            onGoToUpload={() => setActiveTab(HOME_TABS.upload)}
+          />
+        )}
+        {activeTab === HOME_TABS.challenge && (
           <div className="container mx-auto px-4 sm:px-6 py-6 animate-fade-in">
             <ReasoningChallenge key={challengeSessionKey} />
           </div>
         )}
-        {activeTab === 3 && (
+        {activeTab === HOME_TABS.examPrep && (
           <div className="animate-fade-in">
             <ExamPrep />
           </div>
         )}
-        {activeTab === 4 && <StudySchedule onSwitchToChallenge={() => setActiveTab(2)} />}
-        {activeTab === 5 && <StudyReport />}
-        {activeTab === 6 && <MyCourses />}
+        {activeTab === HOME_TABS.schedule && (
+          <StudySchedule onSwitchToChallenge={() => setActiveTab(HOME_TABS.challenge)} />
+        )}
+        {activeTab === HOME_TABS.report && <StudyReport />}
+        {activeTab === HOME_TABS.courses && <MyCourses />}
       </main>
     </div>
   );

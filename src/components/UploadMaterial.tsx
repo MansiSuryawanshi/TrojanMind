@@ -1,18 +1,26 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, FileText, Cloud, CheckCircle2, Loader2 } from 'lucide-react';
-import { extractTextFromPDF } from '../services/pdfService';
+import { extractPdfDocument } from '../services/pdfService';
+import type { SaveDocumentMeta } from '../services/firebaseService';
 
 interface UploadMaterialProps {
   content: string;
-  onContentChange: (content: string) => void;
+  onContentChange: (content: string, meta?: SaveDocumentMeta) => void;
   onStart: (fileName?: string) => void;
+  onSaveForSummary?: (fileName?: string) => void;
   isSaving: boolean;
 }
 
 type UploadMode = 'paste' | 'file' | 'drive';
 
-const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChange, onStart, isSaving }) => {
+const UploadMaterial: React.FC<UploadMaterialProps> = ({
+  content,
+  onContentChange,
+  onStart,
+  onSaveForSummary,
+  isSaving,
+}) => {
   const [mode, setMode] = useState<UploadMode>('paste');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -48,10 +56,16 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
       setIsParsing(true);
       try {
         console.log(`Step 2: PDF detected. Initializing browser-side analysis...`);
-        const text = await extractTextFromPDF(file);
-        console.log(`Step 3: Extraction SUCCESS! Total Chars: ${text.length}`);
-        onContentChange(text);
-        setMode('paste'); // Switch to preview
+        const extracted = await extractPdfDocument(file);
+        console.log(`Step 3: Extraction SUCCESS! Pages: ${extracted.pageCount}, Chars: ${extracted.fullText.length}`);
+        onContentChange(extracted.fullText, {
+          pageCount: extracted.pageCount,
+          emptyPages: extracted.emptyPages,
+          scannedPages: extracted.scannedPages,
+          pageManifest: extracted.manifest,
+          processed: extracted.fullText.trim().length > 0,
+        });
+        setMode('paste');
       } catch (err: any) {
         console.error(`Step 3.FAIL: Parsing failed.`, err);
         alert(`Could not extract text from this PDF. It might be an image-only scan or password protected.`);
@@ -65,14 +79,14 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
       reader.onload = (e) => {
         const text = e.target?.result as string;
         console.log(`Step 3: Extraction SUCCESS! Content Length: ${text.length} chars.`);
-        onContentChange(text);
+        onContentChange(text, { pageCount: 1, processed: true });
         setMode('paste');
         console.groupEnd();
       };
       reader.readAsText(file);
     } else {
       console.log(`Step 2: Non-text file detected. Informing user of limited extraction.`);
-      onContentChange(""); 
+      onContentChange("", { pageCount: 0 });
       alert(`Note: Direct parsing for ${file.name.split('.').pop()?.toUpperCase()} is limited in this beta. For best results, please copy and paste the text from your document directly into the 'Paste Text' tab.`);
       setMode('paste');
       console.groupEnd();
@@ -229,7 +243,7 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
       </div>
 
       {/* CTA Button */}
-      <div className="mt-10">
+      <div className="mt-10 space-y-3">
         <button
           type="button" 
           onClick={() => onStart(selectedFile?.name || "Manual Upload")}
@@ -250,6 +264,16 @@ const UploadMaterial: React.FC<UploadMaterialProps> = ({ content, onContentChang
             ctaLabel
           )}
         </button>
+        {onSaveForSummary && (
+          <button
+            type="button"
+            onClick={() => onSaveForSummary(selectedFile?.name || 'Manual Upload')}
+            disabled={isSaving || isParsing || !content.trim()}
+            className="btn-secondary w-full py-4 rounded-xl font-semibold text-base disabled:opacity-50"
+          >
+            Save & Open Summary →
+          </button>
+        )}
       </div>
     </div>
   );

@@ -11,11 +11,12 @@ interface NavbarProps {
 const navItems = [
   { label: 'Home', index: 0 },
   { label: 'Upload', index: 1 },
-  { label: 'Challenge', index: 2 },
-  { label: 'Exam Prep', index: 3 },
-  { label: 'Study Schedule', index: 4 },
-  { label: 'Study Report', index: 5 },
-  { label: 'My Courses', index: 6 },
+  { label: 'Summary', index: 2 },
+  { label: 'Challenge', index: 3 },
+  { label: 'Exam Prep', index: 4 },
+  { label: 'Study Schedule', index: 5 },
+  { label: 'Study Report', index: 6 },
+  { label: 'My Courses', index: 7 },
 ];
 
 const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
@@ -84,7 +85,7 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
         </div>
 
         <div className="flex items-center gap-2">
-          <BrightspacePill status={bs} onClick={() => go(6)} />
+          <BrightspacePill status={bs} onClick={() => go(7)} />
 
           <button
             type="button"

@@ -17,7 +17,31 @@ export interface StudyDocument {
   rawText: string;
   extractedTopics?: string[];
   processed: boolean;
+  pageCount?: number;
+  emptyPages?: number[];
+  scannedPages?: number[];
+  pageManifest?: {
+    page: number;
+    charCount: number;
+    isEmpty: boolean;
+    likelyScanned: boolean;
+    processed: boolean;
+  }[];
 }
+
+export type {
+  SummaryMode,
+  StructuredSummary,
+  SummaryRecord,
+  ConceptCard,
+  Flashcard,
+  FlashcardDeck,
+  ChatMessage,
+  ChatSession,
+  MistakeEntry,
+  RevisionTask,
+  SummaryProgress,
+} from './summary';
 
 export interface StudentScore {
   correctness: number;

@@ -13,7 +13,7 @@ import {
   Activity
 } from 'lucide-react';
 import type { QuizAttempt } from '../types';
-import { USER_ID } from '../services/firebaseService';
+import { USER_ID, listUserDocuments, listAllSummaries, listMistakes } from '../services/firebaseService';
 import { generateReport } from '../services/claudeService';
 import { useStore } from '../store/store';
 
@@ -212,10 +212,17 @@ export const StudyReport: React.FC = () => {
   // Global Store
   const attempts = useStore((s) => s.allAttempts);
   const isInitialLoadComplete = useStore((s) => s.isInitialLoadComplete);
+  const summaryBridge = useStore((s) => s.summaryBridge);
 
   const [isLoading, setIsLoading] = useState(!isInitialLoadComplete);
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [docInsights, setDocInsights] = useState<{
+    uploads: number;
+    summaries: number;
+    mistakes: number;
+    missedConcepts: string[];
+  } | null>(null);
 
   useEffect(() => {
     if (isInitialLoadComplete) {
@@ -223,6 +230,33 @@ export const StudyReport: React.FC = () => {
       console.log(`[StudyReport-SYNC] Dashboard grounded in ${attempts.length} attempts.`);
     }
   }, [isInitialLoadComplete, attempts.length]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [docs, sums, mistakes] = await Promise.all([
+          listUserDocuments(),
+          listAllSummaries(),
+          listMistakes(),
+        ]);
+        const missed = [
+          ...new Set(
+            mistakes
+              .filter((m) => m.conceptMisunderstood)
+              .map((m) => m.conceptMisunderstood as string)
+          ),
+        ].slice(0, 8);
+        setDocInsights({
+          uploads: docs.length,
+          summaries: sums.length,
+          mistakes: mistakes.filter((m) => !m.reviewed).length,
+          missedConcepts: missed,
+        });
+      } catch {
+        setDocInsights(null);
+      }
+    })();
+  }, [attempts.length]);
 
   const loadData = async () => {
      // Re-trigger global sync if needed, but the loader handles it.
@@ -335,6 +369,47 @@ export const StudyReport: React.FC = () => {
               <Clock size={14}/> Refresh Stats
            </button>
         </div>
+      </div>
+
+      <div className="surface rounded-2xl border border-line p-5 mb-8">
+        <h3 className="text-sm font-extrabold uppercase tracking-wider mb-4 text-cardinal">Document-based learning insights</h3>
+        {!docInsights ? (
+          <p className="text-sm text-muted">Not enough practice data</p>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <div className="text-muted text-xs uppercase font-bold">Uploads studied</div>
+              <div className="text-2xl font-extrabold text-ink">{docInsights.uploads}</div>
+            </div>
+            <div>
+              <div className="text-muted text-xs uppercase font-bold">Summaries saved</div>
+              <div className="text-2xl font-extrabold text-ink">{docInsights.summaries}</div>
+              <div className="text-[10px] text-muted mt-1">Summary alone ≠ mastery</div>
+            </div>
+            <div>
+              <div className="text-muted text-xs uppercase font-bold">Open mistakes</div>
+              <div className="text-2xl font-extrabold text-ink">{docInsights.mistakes}</div>
+            </div>
+            <div>
+              <div className="text-muted text-xs uppercase font-bold">Flashcards reviewed</div>
+              <div className="text-2xl font-extrabold text-ink">{summaryBridge.flashcardsReviewedCount || 0}</div>
+            </div>
+            <div className="col-span-2 md:col-span-4">
+              <div className="text-muted text-xs uppercase font-bold mb-2">Frequently missed concepts</div>
+              {docInsights.missedConcepts.length === 0 ? (
+                <p className="text-muted">Not enough practice data</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {docInsights.missedConcepts.map((c) => (
+                    <span key={c} className="px-3 py-1 rounded-full bg-danger-soft border border-danger/20 text-danger text-xs font-bold">
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 mb-10">

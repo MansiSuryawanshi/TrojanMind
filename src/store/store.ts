@@ -9,6 +9,17 @@ import type {
   QuizAnswer,
   QuizAttempt,
 } from '../types';
+import type { RevisionTask } from '../types/summary';
+
+/** Bridge so Summary can hand off into Exam Prep / Schedule without a router. */
+export interface SummaryBridge {
+  documentId: string | null;
+  fileName: string | null;
+  openMaterialPractice: boolean;
+  topicForSchedule: string | null;
+  summaryReviewedCount: number;
+  flashcardsReviewedCount: number;
+}
 
 export interface SessionState {
   session: Session | null;
@@ -28,6 +39,9 @@ export interface SessionState {
   crossExamHistory: CrossExamRecord[];
   quizAnswers: QuizAnswer[];
 
+  summaryBridge: SummaryBridge;
+  revisionTasks: RevisionTask[];
+
   setSession: (session: Session) => void;
   setQuiz: (quiz: GeneratedQuestion[]) => void;
   updatePhase: (phase: SessionPhase) => void;
@@ -46,7 +60,20 @@ export interface SessionState {
   addCrossExamRecord: (record: CrossExamRecord) => void;
   recordQuizAnswer: (answer: QuizAnswer) => void;
   clearQuizAnswers: () => void;
+
+  setSummaryBridge: (patch: Partial<SummaryBridge>) => void;
+  setRevisionTasks: (tasks: RevisionTask[]) => void;
+  addRevisionTaskLocal: (task: RevisionTask) => void;
 }
+
+const defaultBridge: SummaryBridge = {
+  documentId: null,
+  fileName: null,
+  openMaterialPractice: false,
+  topicForSchedule: null,
+  summaryReviewedCount: 0,
+  flashcardsReviewedCount: 0,
+};
 
 export const useStore = create<SessionState>((set) => ({
   session: null,
@@ -63,6 +90,9 @@ export const useStore = create<SessionState>((set) => ({
   topicProgress: [],
   crossExamHistory: [],
   quizAnswers: [],
+
+  summaryBridge: { ...defaultBridge },
+  revisionTasks: [],
 
   setSession: (session: Session) => set({ session }),
   setQuiz: (quiz: GeneratedQuestion[]) => set({ currentQuiz: quiz }),
@@ -94,4 +124,10 @@ export const useStore = create<SessionState>((set) => ({
       quizAnswers: [...state.quizAnswers, answer],
     })),
   clearQuizAnswers: () => set({ quizAnswers: [] }),
+
+  setSummaryBridge: (patch) =>
+    set((state) => ({ summaryBridge: { ...state.summaryBridge, ...patch } })),
+  setRevisionTasks: (revisionTasks) => set({ revisionTasks }),
+  addRevisionTaskLocal: (task) =>
+    set((state) => ({ revisionTasks: [...state.revisionTasks, task] })),
 }));

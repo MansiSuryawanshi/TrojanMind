@@ -14,8 +14,21 @@ import {
   Timestamp 
 } from "firebase/firestore";
 
-import { db } from "./firebaseConfig";
-import type { QuizAttempt, ChallengeSession, Participant } from "../types";
+import { assertFirebaseConfigured, db } from "./firebaseConfig";
+import type {
+  QuizAttempt,
+  ChallengeSession,
+  Participant,
+  StudyDocument as StudyDocumentType,
+} from "../types";
+import type {
+  SummaryRecord,
+  ChatSession,
+  FlashcardDeck,
+  MistakeEntry,
+  RevisionTask,
+  PageManifestEntry,
+} from "../types/summary";
 
 /**
  * Stable User ID Management
@@ -25,7 +38,6 @@ function getPersistentUserId(): string {
   const key = "studybuddy_user_id";
   let id = localStorage.getItem(key);
   if (!id) {
-    // Defaulting to "guest_user" to match environment shown in console
     id = "guest_user";
     localStorage.setItem(key, id);
     console.log(`[Firebase] User ID initialized to: ${id}`);
@@ -44,12 +56,30 @@ export interface StudyDocument {
   rawText: string;
   extractedTopics?: string[];
   processed: boolean;
+  pageCount?: number;
+  emptyPages?: number[];
+  scannedPages?: number[];
+  pageManifest?: PageManifestEntry[];
+}
+
+export interface SaveDocumentMeta {
+  pageCount?: number;
+  emptyPages?: number[];
+  scannedPages?: number[];
+  pageManifest?: PageManifestEntry[];
+  extractedTopics?: string[];
+  processed?: boolean;
 }
 
 /**
  * Saves a new study document to Firebase Firestore.
  */
-export async function saveDocument(fileName: string, rawText: string): Promise<string> {
+export async function saveDocument(
+  fileName: string,
+  rawText: string,
+  meta: SaveDocumentMeta = {}
+): Promise<string> {
+  assertFirebaseConfigured();
   const path = `users/${USER_ID}/documents`;
   console.group(`[Firebase-WRITE] ${path}`);
   console.log(`[Firebase-Step 1] Initializing document structure...`);
@@ -59,15 +89,18 @@ export async function saveDocument(fileName: string, rawText: string): Promise<s
       fileName,
       rawText,
       uploadedAt: Timestamp.now(),
-      processed: false,
-      extractedTopics: []
+      processed: meta.processed ?? Boolean(rawText.trim()),
+      extractedTopics: meta.extractedTopics ?? [],
+      pageCount: meta.pageCount ?? 1,
+      emptyPages: meta.emptyPages ?? [],
+      scannedPages: meta.scannedPages ?? [],
+      pageManifest: meta.pageManifest ?? [],
     };
     
     console.log(`[Firebase-Step 2] Calling addDoc()...`);
     const docRef = await addDoc(userDocsRef, newDoc);
     console.log(`[Firebase-Step 2.Success] DocID: ${docRef.id} | Size: ${rawText.length} chars`);
     
-    // Set this doc as the active one for the user
     console.log(`[Firebase-Step 3] Updating activeDocumentId...`);
     await setDoc(doc(db, "users", USER_ID), { activeDocumentId: docRef.id }, { merge: true });
     console.log(`[Firebase-Step 3.Success] activeDocumentId grounded.`);
@@ -79,6 +112,15 @@ export async function saveDocument(fileName: string, rawText: string): Promise<s
     console.groupEnd();
     throw error;
   }
+}
+
+export async function markDocumentProcessed(
+  docId: string,
+  updates: Partial<StudyDocumentType> = {}
+): Promise<void> {
+  assertFirebaseConfigured();
+  const docRef = doc(db, "users", USER_ID, "documents", docId);
+  await updateDoc(docRef, { processed: true, ...updates });
 }
 
 /**
@@ -188,7 +230,7 @@ export async function listUserDocuments(): Promise<StudyDocument[]> {
 /**
  * Saves a completed quiz attempt to Firebase Firestore.
  */
-export async function saveQuizAttempt(attempt: Omit<QuizAttempt, "id">): Promise<string | null> {
+export async function saveQuizAttempt(attempt: Omit<QuizAttempt, "id" | "createdAt"> & { createdAt?: any }): Promise<string | null> {
   const path = `users/${USER_ID}/quizAttempts`;
   console.group(`[Firebase-WRITE] ${path}`);
   try {
@@ -405,6 +447,183 @@ export async function submitParticipantResults(
     [`participants.${userId}.results`]: results,
     [`participants.${userId}.status`]: 'finished'
   });
+}
+
+// ── Summary feature persistence (user-scoped) ────────────────────────────────
+
+export async function saveSummaryRecord(
+  record: Omit<SummaryRecord, "id" | "createdAt">
+): Promise<string> {
+  assertFirebaseConfigured();
+  const ref = collection(db, "users", USER_ID, "summaries");
+  const docRef = await addDoc(ref, {
+    ...record,
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  });
+  return docRef.id;
+}
+
+export async function listSummariesForDocument(documentId: string): Promise<SummaryRecord[]> {
+  assertFirebaseConfigured();
+  try {
+    const ref = collection(db, "users", USER_ID, "summaries");
+    const q = query(ref, where("documentId", "==", documentId), orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as SummaryRecord));
+  } catch (error) {
+    console.warn("[Firebase] listSummariesForDocument fallback:", error);
+    const ref = collection(db, "users", USER_ID, "summaries");
+    const snap = await getDocs(ref);
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as SummaryRecord))
+      .filter((s) => s.documentId === documentId)
+      .sort((a, b) => {
+        const ta = a.createdAt?.toMillis?.() ?? 0;
+        const tb = b.createdAt?.toMillis?.() ?? 0;
+        return tb - ta;
+      });
+  }
+}
+
+export async function getSummaryById(summaryId: string): Promise<SummaryRecord | null> {
+  assertFirebaseConfigured();
+  const snap = await getDoc(doc(db, "users", USER_ID, "summaries", summaryId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as SummaryRecord;
+}
+
+export async function listAllSummaries(): Promise<SummaryRecord[]> {
+  assertFirebaseConfigured();
+  try {
+    const ref = collection(db, "users", USER_ID, "summaries");
+    const q = query(ref, orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as SummaryRecord));
+  } catch {
+    return [];
+  }
+}
+
+export async function saveChatSession(
+  documentId: string,
+  messages: ChatSession["messages"],
+  existingId?: string
+): Promise<string> {
+  assertFirebaseConfigured();
+  const payload = {
+    documentId,
+    messages,
+    updatedAt: Timestamp.now(),
+  };
+  if (existingId) {
+    await setDoc(doc(db, "users", USER_ID, "chats", existingId), payload, { merge: true });
+    return existingId;
+  }
+  const docRef = await addDoc(collection(db, "users", USER_ID, "chats"), payload);
+  return docRef.id;
+}
+
+export async function getChatForDocument(documentId: string): Promise<ChatSession | null> {
+  assertFirebaseConfigured();
+  try {
+    const ref = collection(db, "users", USER_ID, "chats");
+    const q = query(ref, where("documentId", "==", documentId));
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    const d = snap.docs[0];
+    return { id: d.id, ...d.data() } as ChatSession;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearChatForDocument(documentId: string): Promise<void> {
+  const existing = await getChatForDocument(documentId);
+  if (existing?.id) {
+    await deleteDoc(doc(db, "users", USER_ID, "chats", existing.id));
+  }
+}
+
+export async function saveFlashcardDeck(
+  deck: Omit<FlashcardDeck, "id" | "createdAt">
+): Promise<string> {
+  assertFirebaseConfigured();
+  const docRef = await addDoc(collection(db, "users", USER_ID, "flashcardDecks"), {
+    ...deck,
+    createdAt: Timestamp.now(),
+  });
+  return docRef.id;
+}
+
+export async function listFlashcardDecks(documentId: string): Promise<FlashcardDeck[]> {
+  assertFirebaseConfigured();
+  try {
+    const ref = collection(db, "users", USER_ID, "flashcardDecks");
+    const q = query(ref, where("documentId", "==", documentId), orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FlashcardDeck));
+  } catch {
+    const snap = await getDocs(collection(db, "users", USER_ID, "flashcardDecks"));
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as FlashcardDeck))
+      .filter((d) => d.documentId === documentId);
+  }
+}
+
+export async function updateFlashcardDeck(deckId: string, cards: FlashcardDeck["cards"]): Promise<void> {
+  assertFirebaseConfigured();
+  await updateDoc(doc(db, "users", USER_ID, "flashcardDecks", deckId), { cards });
+}
+
+export async function saveMistake(entry: Omit<MistakeEntry, "id" | "dateAttempted">): Promise<string> {
+  assertFirebaseConfigured();
+  const docRef = await addDoc(collection(db, "users", USER_ID, "mistakes"), {
+    ...entry,
+    dateAttempted: Timestamp.now(),
+  });
+  return docRef.id;
+}
+
+export async function listMistakes(): Promise<MistakeEntry[]> {
+  assertFirebaseConfigured();
+  try {
+    const q = query(collection(db, "users", USER_ID, "mistakes"), orderBy("dateAttempted", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as MistakeEntry));
+  } catch {
+    return [];
+  }
+}
+
+export async function updateMistake(
+  mistakeId: string,
+  updates: Partial<MistakeEntry>
+): Promise<void> {
+  assertFirebaseConfigured();
+  await updateDoc(doc(db, "users", USER_ID, "mistakes", mistakeId), updates);
+}
+
+export async function saveRevisionTask(
+  task: Omit<RevisionTask, "id" | "createdAt">
+): Promise<string> {
+  assertFirebaseConfigured();
+  const docRef = await addDoc(collection(db, "users", USER_ID, "revisionTasks"), {
+    ...task,
+    createdAt: Timestamp.now(),
+  });
+  return docRef.id;
+}
+
+export async function listRevisionTasks(): Promise<RevisionTask[]> {
+  assertFirebaseConfigured();
+  try {
+    const q = query(collection(db, "users", USER_ID, "revisionTasks"), orderBy("date", "asc"));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as RevisionTask));
+  } catch {
+    return [];
+  }
 }
 
 export { USER_ID };
