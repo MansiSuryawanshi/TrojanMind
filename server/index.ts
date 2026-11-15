@@ -9,6 +9,13 @@
  * LOCAL_BRIGHTSPACE_EXPECTED_UNIQUE_NAME, and is excluded from Vercel via
  * .vercelignore.
  *
+ * POST /brightspace/courses/:id/import (owner only, same identity checks)
+ * retrieves readable text for the selected topic keys only, resolved against a
+ * fresh content tree, and streams one NDJSON result per item.
+ *
+ * POST /ai/messages proxies Claude for every TrojanMind AI feature, for any
+ * verified user; ANTHROPIC_API_KEY stays on this server.
+ *
  * Per-user connection status (GET /connections) is available to any verified
  * user, but only ever describes the caller's own UID. Individual Brightspace
  * connections are modelled but not available yet (no registered OAuth app).
@@ -32,6 +39,7 @@ import {
   closeConnector,
   getBrightspaceOrigin,
   getCourseContent,
+  getCourseContentForImport,
   getMyCourses,
   getSignedInUniqueName,
   signIn,
@@ -46,6 +54,8 @@ import {
   type ConnectionMethod,
   type ConnectionState,
 } from './connections.ts';
+import { importOne, indexTopics, parseImportKeys, MAX_IMPORT_ITEMS } from './materialImport.ts';
+import { AiRequestError, aiConfigured, forwardToAnthropic, sanitizeAiBody } from './aiProxy.ts';
 
 if (!FIREBASE_PROJECT_ID) {
   console.error('[server] FIREBASE_PROJECT_ID is not set. Copy server/.env.example to server/.env.local and fill it in.');
@@ -95,17 +105,40 @@ class HttpError extends Error {
   }
 }
 
-function sendError(res: ServerResponse, err: unknown, origin?: string) {
-  if (err instanceof HttpError) {
-    return send(res, err.status, { error: { code: err.code, message: err.message } }, origin);
-  }
+/** Status + safe, TrojanMind-authored error body for any thrown value. */
+function describeError(err: unknown): { status: number; code: string; message: string } {
+  if (err instanceof HttpError || err instanceof AiRequestError) return { status: err.status, code: err.code, message: err.message };
   if (err instanceof ConnectorError) {
     const status = err.kind === 'timeout' ? 504 : err.kind === 'auth' ? 409 : 502;
     const code = err.authState ? `brightspace_${err.authState}` : `brightspace_${err.kind}`;
-    return send(res, status, { error: { code, message: err.message } }, origin);
+    return { status, code, message: err.message };
   }
   console.error('[server] unexpected error');
-  return send(res, 500, { error: { code: 'internal', message: 'Unexpected connector error.' } }, origin);
+  return { status: 500, code: 'internal', message: 'Unexpected connector error.' };
+}
+
+function sendError(res: ServerResponse, err: unknown, origin?: string) {
+  const { status, code, message } = describeError(err);
+  return send(res, status, { error: { code, message } }, origin);
+}
+
+/** Read a JSON request body up to `limit` bytes. */
+async function readJsonBody(req: IncomingMessage, limit: number): Promise<unknown> {
+  if (!(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+    throw new HttpError(415, 'unsupported_media_type', 'Expected a JSON body.');
+  }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > limit) throw new HttpError(413, 'body_too_large', 'Request body is too large.');
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    throw new HttpError(400, 'invalid_json', 'Request body is not valid JSON.');
+  }
 }
 
 // ── Access control (runs before anything touches the connector) ─────────────
@@ -236,6 +269,25 @@ async function loadVerifiedCourseContent(courseId: number): Promise<{ course: Br
   return { course, content };
 }
 
+/** Same checks as loadVerifiedCourseContent, plus the topic index and page bodies used for import. */
+async function loadVerifiedImportIndex(courseId: number) {
+  const courses = await loadVerifiedCourses();
+  const course = courses.find((c) => c.id === courseId);
+  if (!course) {
+    throw new HttpError(404, 'course_not_found', 'This course isn’t in your Brightspace course list, so nothing was imported.');
+  }
+  if (course.canAccess === false) {
+    throw new HttpError(403, 'course_no_access', 'Brightspace reports this course isn’t accessible to your account right now.');
+  }
+  const origin = await getBrightspaceOrigin();
+  const { content, inlineHtml } = await getCourseContentForImport(courseId, origin);
+  await requireExpectedIdentity();
+  return { course, topics: indexTopics(content), inlineHtml };
+}
+
+/** UIDs with an import running: repeated clicks or tabs never start a second one. */
+const importsInFlight = new Set<string>();
+
 // ── Connect flow (single-flight) ────────────────────────────────────────────
 
 type ConnectResult =
@@ -282,7 +334,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(204, {
       ...(origin ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
       'Access-Control-Allow-Methods': 'GET, POST',
-      'Access-Control-Allow-Headers': 'Authorization',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
       'Access-Control-Max-Age': '600',
     });
     return res.end();
@@ -351,6 +403,64 @@ const server = createServer(async (req, res) => {
       }, origin);
     }
 
+    // Import the selected items' readable text. Streams one NDJSON line per item.
+    const importMatch = /^\/brightspace\/courses\/([^/]+)\/import$/.exec(url.pathname);
+    if (req.method === 'POST' && importMatch) {
+      const uid = await requireOwner(req);
+      const courseId = parseCourseId(importMatch[1]);
+      const keys = parseImportKeys(await readJsonBody(req, 64 * 1024));
+      if (!keys) throw new HttpError(400, 'invalid_selection', `Select between 1 and ${MAX_IMPORT_ITEMS} items to import.`);
+      if (importsInFlight.has(uid)) throw new HttpError(409, 'import_in_progress', 'An import is already running. Wait for it to finish.');
+      importsInFlight.add(uid);
+      try {
+        // All access checks happen before any response is started.
+        const { course, topics, inlineHtml } = await trackLocal(uid, () => loadVerifiedImportIndex(courseId));
+        let clientGone = false;
+        res.on('close', () => { if (!res.writableFinished) clientGone = true; });
+        res.writeHead(200, {
+          'Content-Type': 'application/x-ndjson; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+          ...(origin ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
+        });
+        const line = (o: unknown) => res.write(`${JSON.stringify(o)}\n`);
+        line({ type: 'start', course: { id: course.id, name: course.name, code: course.code }, total: keys.length });
+        let stopped = false;
+        for (let i = 0; i < keys.length && !clientGone; i++) {
+          try {
+            // Re-confirm the Brightspace account before each retrieval.
+            await requireExpectedIdentity();
+            line({ type: 'item', item: await trackLocal(uid, () => importOne(courseId, i, keys[i], topics, inlineHtml)) });
+          } catch (err) {
+            const { code, message } = describeError(err);
+            line({ type: 'error', code, message, completed: i });
+            stopped = true;
+            break;
+          }
+        }
+        if (!stopped && !clientGone) line({ type: 'done', retrievedAt: new Date().toISOString() });
+        res.end();
+        return;
+      } finally {
+        importsInFlight.delete(uid);
+      }
+    }
+
+    // Claude proxy for every TrojanMind AI feature. Any verified user; key stays here.
+    if (req.method === 'POST' && url.pathname === '/ai/messages') {
+      await requireVerifiedUser(req);
+      const body = sanitizeAiBody(await readJsonBody(req, 4 * 1024 * 1024));
+      const upstream = await forwardToAnthropic(body);
+      res.writeHead(upstream.status, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+        ...(origin ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
+      });
+      res.end(upstream.text);
+      return;
+    }
+
     return sendError(res, new HttpError(404, 'not_found', 'Not found.'), origin);
   } catch (err) {
     return sendError(res, err, origin);
@@ -362,6 +472,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[server] Revocation checks: ${HAS_ADMIN_CREDENTIALS ? 'on' : 'off (no service account)'}`);
   if (!OWNER_UID) console.warn('[server] LOCAL_BRIGHTSPACE_OWNER_UID is not set: every Brightspace request will be refused.');
   if (!EXPECTED_UNIQUE_NAME) console.warn('[server] LOCAL_BRIGHTSPACE_EXPECTED_UNIQUE_NAME is not set: every Brightspace request will be refused.');
+  if (!aiConfigured()) console.warn('[server] ANTHROPIC_API_KEY is not set: AI features will return ai_not_configured.');
 });
 
 const shutdown = () => {

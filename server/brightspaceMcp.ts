@@ -414,6 +414,8 @@ interface ParseCtx {
   origin: string | null;
   topics: number;
   modules: number;
+  /** When set, collects each topic's inline HTML body (by topic ID) for import. */
+  inline?: Map<number, string>;
 }
 
 function parseTopic(r: Record<string, unknown>, ctx: ParseCtx): ContentTopic | null {
@@ -444,6 +446,7 @@ function parseTopic(r: Record<string, unknown>, ctx: ParseCtx): ContentTopic | n
   }
 
   ctx.topics++;
+  if (ctx.inline && typeof r.content === 'string' && r.content.trim()) ctx.inline.set(id, r.content);
   return {
     kind: 'topic',
     key: String(id),
@@ -530,7 +533,7 @@ function parseNode(raw: unknown, ctx: ParseCtx, depth: number): ContentModule | 
 }
 
 /** Validate get_course_content JSON into TrojanMind's content tree, preserving order. */
-export function parseCourseContent(result: unknown, courseId: number, origin: string | null): CourseContent {
+export function parseCourseContent(result: unknown, courseId: number, origin: string | null, inline?: Map<number, string>): CourseContent {
   const blocks = textBlocks(result);
   if (isErrorResult(result)) throw toolErrorFrom(blocks[0]);
   if (blocks.length === 0) throw new ConnectorError('parse', 'Brightspace returned an empty response for this course.');
@@ -549,7 +552,7 @@ export function parseCourseContent(result: unknown, courseId: number, origin: st
     throw new ConnectorError('parse', 'Brightspace returned content for a different course.');
   }
 
-  const ctx: ParseCtx = { courseId, origin, topics: 0, modules: 0 };
+  const ctx: ParseCtx = { courseId, origin, topics: 0, modules: 0, inline };
   const modules: ContentModule[] = [];
   const looseTopics: ContentTopic[] = [];
   for (const raw of d.contentTree) {
@@ -568,6 +571,139 @@ export function parseCourseContent(result: unknown, courseId: number, origin: st
 
 export async function getCourseContent(courseId: number, origin: string | null): Promise<CourseContent> {
   return parseCourseContent(await call('get_course_content', { courseId }), courseId, origin);
+}
+
+/** Content tree plus each topic's inline HTML body, for importing selected pages. */
+export async function getCourseContentForImport(courseId: number, origin: string | null): Promise<{ content: CourseContent; inlineHtml: Map<number, string> }> {
+  const inlineHtml = new Map<number, string>();
+  const content = parseCourseContent(await call('get_course_content', { courseId }), courseId, origin, inlineHtml);
+  return { content, inlineHtml };
+}
+
+// ── File text retrieval (download_file, inline mode) ────────────────────────
+
+/**
+ * Why a selected item produced no text. Codes only: the UI words them.
+ * Connector prose is never forwarded.
+ */
+export type RetrievalFailure =
+  | 'no_text_layer'      // PDF with no text layer (likely scanned)
+  | 'no_office_text'     // Office file with no readable text
+  | 'image_only'         // image file: nothing to read as text
+  | 'unsupported_type'   // binary format the connector can't read inline
+  | 'too_large'          // over the connector's 10 MB inline cap
+  | 'not_released'       // not yet open / ended / locked / hidden
+  | 'not_found'          // moved, deleted, or not visible to this account
+  | 'access_denied'
+  | 'rate_limited'
+  | 'unreachable'
+  | 'empty'
+  | 'unknown';
+
+export type FileTextResult =
+  | { ok: true; text: string; truncated: boolean; pages: number | null; mimeType: string | null }
+  | { ok: false; reason: RetrievalFailure };
+
+const SECTION_HEADER = /^--- (Extracted PDF text|Extracted text|File contents)\b[^\n]*---\n/;
+
+function failureFromToolError(text: string): RetrievalFailure {
+  const t = text.trim();
+  if (/too large/i.test(t)) return 'too_large';
+  if (/not (yet )?(open|released|available)|has ended|is locked|is hidden|not been released/i.test(t)) return 'not_released';
+  if (/^Resource not found|not found|moved or deleted|web page instead of the course file/i.test(t)) return 'not_found';
+  if (/^Access denied|not be allowed|not allowed to open/i.test(t)) return 'access_denied';
+  if (/^Rate limited/i.test(t)) return 'rate_limited';
+  if (/^Could not connect to Brightspace/i.test(t)) return 'unreachable';
+  if (/unsupported|undetectable|empty \(0 bytes\)|file type/i.test(t)) return 'unsupported_type';
+  return 'unknown';
+}
+
+/** Sign-in problems stop the whole import; anything else fails just this item. */
+function isAuthText(text: string): boolean {
+  if (/web page instead of the course file/i.test(text)) return false;
+  return /sign in|signed in|sign-in|session cookie|authenticat|Authenticator|Duo/i.test(text);
+}
+
+function authStop(text: string): ConnectorError {
+  const outcome = classifyAuthText(text);
+  return outcome.state === 'connected'
+    ? new ConnectorError('auth', 'Brightspace sign-in needs attention. Click “Check again” on My Courses.', 'action_required')
+    : new ConnectorError('auth', outcome.message, outcome.state);
+}
+
+/** Parse a download_file inline response into extracted text or a failure code. */
+export function parseInlineDownload(result: unknown): FileTextResult {
+  const blocks = textBlocks(result);
+  if (isErrorResult(result)) {
+    const msg = blocks[0] ?? '';
+    if (isAuthText(msg)) throw authStop(msg);
+    return { ok: false, reason: failureFromToolError(msg) };
+  }
+  let meta: Record<string, unknown>;
+  try {
+    meta = JSON.parse(blocks[0] ?? '') as Record<string, unknown>;
+  } catch {
+    // A sign-in notice in place of the file.
+    if (blocks[0] && isAuthText(blocks[0])) throw authStop(blocks[0]);
+    return { ok: false, reason: 'unknown' };
+  }
+  const rep = meta.representation;
+  const mimeType = str(meta.mimeType);
+  if (rep === 'pdf_text_extraction_failed') return { ok: false, reason: 'no_text_layer' };
+  if (rep === 'office_text_extraction_failed') return { ok: false, reason: 'no_office_text' };
+  if (rep === 'image') return { ok: false, reason: 'image_only' };
+  if (rep === 'binary_description_only') return { ok: false, reason: mimeType?.startsWith('image/') ? 'image_only' : 'unsupported_type' };
+  if (rep !== 'extracted_text' && rep !== 'text') return { ok: false, reason: 'unknown' };
+
+  const body = blocks[1];
+  if (typeof body !== 'string') return { ok: false, reason: 'empty' };
+  let text = body.replace(SECTION_HEADER, '');
+  // Drop the connector's own truncation note; `truncated` records it instead.
+  text = text.replace(/\n\n\[\.\.\.truncated at \d+ characters;[\s\S]*$/, '');
+  if (mimeType === 'text/html') text = htmlToText(text);
+  text = text.replace(/\r\n/g, '\n').trim();
+  if (!text) return { ok: false, reason: 'empty' };
+  return {
+    ok: true,
+    text,
+    truncated: meta.truncated === true,
+    pages: typeof meta.pages === 'number' ? meta.pages : null,
+    mimeType,
+  };
+}
+
+/** A content-topic file (download_file with topicId), as extracted text. */
+export async function downloadTopicText(courseId: number, topicId: number): Promise<FileTextResult> {
+  return parseInlineDownload(await call('download_file', { courseId, topicId }));
+}
+
+/** A course-file-store file (download_file with coursePath), as extracted text. */
+export async function downloadCourseFileText(courseId: number, coursePath: string): Promise<FileTextResult> {
+  return parseInlineDownload(await call('download_file', { courseId, coursePath }));
+}
+
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+/** Readable plain text from a Brightspace HTML body. Text only: no markup survives. */
+export function htmlToText(html: string): string {
+  return html
+    .replace(/<(script|style|noscript|template)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '\n• ')
+    .replace(/<\/(p|div|h[1-6]|li|tr|table|section|article|blockquote|pre)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+      if (e[0] === '#') {
+        const code = e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+        return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : ' ';
+      }
+      return ENTITIES[e.toLowerCase()] ?? m;
+    })
+    .replace(/[ \t\f\v]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export async function closeConnector(): Promise<void> {

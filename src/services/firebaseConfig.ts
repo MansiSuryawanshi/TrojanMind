@@ -2,17 +2,19 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
-const REQUIRED_VITE_VARS = [
-  "VITE_FIREBASE_API_KEY",
-  "VITE_FIREBASE_AUTH_DOMAIN",
-  "VITE_FIREBASE_PROJECT_ID",
-  "VITE_FIREBASE_STORAGE_BUCKET",
-  "VITE_FIREBASE_MESSAGING_SENDER_ID",
-  "VITE_FIREBASE_APP_ID"
-];
+// Static property access only. A computed `import.meta.env[name]` makes Vite
+// inline EVERY VITE_ variable into the public bundle, secrets included.
+const REQUIRED_VITE_VARS: Record<string, string | undefined> = {
+  VITE_FIREBASE_API_KEY: import.meta.env.VITE_FIREBASE_API_KEY,
+  VITE_FIREBASE_AUTH_DOMAIN: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  VITE_FIREBASE_PROJECT_ID: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  VITE_FIREBASE_STORAGE_BUCKET: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  VITE_FIREBASE_MESSAGING_SENDER_ID: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  VITE_FIREBASE_APP_ID: import.meta.env.VITE_FIREBASE_APP_ID,
+};
 
 console.group("[Firebase-Config] Initializing Core...");
-const missingVars = REQUIRED_VITE_VARS.filter(v => !import.meta.env[v]);
+const missingVars = Object.keys(REQUIRED_VITE_VARS).filter((v) => !REQUIRED_VITE_VARS[v]);
 if (missingVars.length > 0) {
   console.warn(`[Firebase-Config] Using Dummy keys. Missing: ${missingVars.join(", ")}`);
 } else {

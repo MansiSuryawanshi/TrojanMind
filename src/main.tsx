@@ -5,14 +5,17 @@ import App from './App.tsx'
 import { AuthProvider } from './auth/AuthProvider'
 import AuthGate from './components/auth/AuthGate'
 import { BrightspaceProvider } from './brightspace/BrightspaceProvider'
+import UserScope from './auth/UserScope'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthProvider>
       <AuthGate>
-        <BrightspaceProvider>
-          <App />
-        </BrightspaceProvider>
+        <UserScope>
+          <BrightspaceProvider>
+            <App />
+          </BrightspaceProvider>
+        </UserScope>
       </AuthGate>
     </AuthProvider>
   </StrictMode>,

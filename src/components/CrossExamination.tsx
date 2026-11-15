@@ -7,7 +7,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/store';
 import { generateFollowUp, evaluateDefense } from '../services/claudeService';
-import { saveCrossExamAttempt, USER_ID, getUserQuizAttempts } from '../services/firebaseService';
+import { saveCrossExamAttempt, getUserId, getUserQuizAttempts } from '../services/firebaseService';
 import { deriveStudentAnalytics } from '../services/analyticsService';
 import type { MistakeDetail } from '../services/analyticsService';
 import type { FollowUpResult, DefenseEvaluation } from '../types';
@@ -209,7 +209,7 @@ export const CrossExamination: React.FC<CrossExaminationProps> = ({
       adjustReadinessScore(adjustment);
 
       const record = {
-        userId: USER_ID,
+        userId: getUserId(),
         topic: selectedTopic,
         originalQuestion: activeMistake.question,
         originalAnswer: activeMistake.pastAnswer,

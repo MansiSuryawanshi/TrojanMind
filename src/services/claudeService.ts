@@ -6,21 +6,13 @@ import type { ScheduleResponse, FollowUpResult, DefenseEvaluation } from '../typ
 import type { ScoreResult } from '../types/index';
 import type { StudySnapshot, GeneratedReport } from '../types/report';
 
-const CLAUDE_URL = '/anthropic/v1/messages';
+import { AI_ENDPOINT as CLAUDE_URL, aiFetch } from './aiClient';
 import { ANTHROPIC_MODEL } from '../config/aiConfig';
 
 
-function getApiKey(): string {
-  return import.meta.env.VITE_CLAUDE_API_KEY as string;
-}
-
+// The API key lives only on the backend; aiFetch adds the user's ID token.
 function buildHeaders() {
-  return {
-    'Content-Type': 'application/json',
-    'x-api-key': getApiKey(),
-    'anthropic-version': '2023-06-01',
-    'anthropic-dangerous-direct-browser-access': 'true',
-  };
+  return { 'Content-Type': 'application/json' };
 }
 
 function messageText(data: { content?: { type?: string; text?: string }[] }): string {
@@ -79,7 +71,7 @@ export async function scoreAnswers(
     '}';
 
   console.log(`Using Anthropic model: ${ANTHROPIC_MODEL}`);
-  const response = await fetch(CLAUDE_URL, {
+  const response = await aiFetch(CLAUDE_URL, {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify({
@@ -132,7 +124,7 @@ Strictness: If the answer is factually correct but uses synonyms or phrasing cha
 
   console.log(`[Claude] Descriptive answer evaluation started...`);
   try {
-    const response = await fetch(CLAUDE_URL, {
+    const response = await aiFetch(CLAUDE_URL, {
       method: 'POST',
       headers: buildHeaders(),
       body: JSON.stringify({
@@ -176,7 +168,7 @@ export const generateFollowUp = async (
     }],
   };
 
-  let res = await fetch(CLAUDE_URL, {
+  let res = await aiFetch(CLAUDE_URL, {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify(body),
@@ -188,7 +180,7 @@ export const generateFollowUp = async (
       thinking?: unknown;
       output_config?: unknown;
     };
-    res = await fetch(CLAUDE_URL, {
+    res = await aiFetch(CLAUDE_URL, {
       method: 'POST',
       headers: buildHeaders(),
       body: JSON.stringify(bare),
@@ -339,7 +331,6 @@ export const generateSchedule = async (
   topicAccuracy?: { topic: string; accuracy: number }[],
   uploadedMaterials: string[] = [],
 ): Promise<ScheduleResponse> => {
-  const apiKey = getApiKey();
 
   // Build per-topic accuracy context so Claude allocates more time to weak topics
   const topicContext = topicAccuracy && topicAccuracy.length > 0
@@ -387,16 +378,6 @@ Generate a study schedule with at most ${Math.min(5, Math.max(1, daysToExam + 1)
 {"schedule":[{"day":"Today · Monday","date":"YYYY-MM-DD","sessions":[{"time":"9:00 am","label":"session name","topic_tag":"gap focus","duration":"45 min","badge_type":"coral","targets_gap":"gap name or null","rationale":"short evidence string","what_to_study":"concrete focus","study_steps":["step 1","step 2","step 3"],"resources":[{"title":"Article title","url":"https://...","type":"article","why":"why this helps"}]}]}],"priority_gap":"most urgent gap","readiness_message":"one sentence"}`;
 
   try {
-    if (!apiKey) {
-      console.warn("[ClaudeService] No API key. Falling back to local generation...");
-      return normalizeScheduleSessions(
-        buildMockSchedule(gaps, avgScore, daysToExam, topicAccuracy, uploadedMaterials),
-        gaps,
-        uploadedMaterials,
-        daysToExam
-      );
-    }
-
     console.log(`[ClaudeService] Generating schedule with ${ANTHROPIC_MODEL}...`);
     const body: Record<string, unknown> = {
       model: ANTHROPIC_MODEL,
@@ -405,7 +386,7 @@ Generate a study schedule with at most ${Math.min(5, Math.max(1, daysToExam + 1)
       messages: [{ role: 'user', content: prompt }],
     };
 
-    let response = await fetch(CLAUDE_URL, {
+    let response = await aiFetch(CLAUDE_URL, {
       method: 'POST',
       headers: buildHeaders(),
       body: JSON.stringify(body),
@@ -413,7 +394,7 @@ Generate a study schedule with at most ${Math.min(5, Math.max(1, daysToExam + 1)
 
     if (!response.ok && response.status === 400) {
       const { thinking: _t, output_config: _o, ...bare } = body;
-      response = await fetch(CLAUDE_URL, {
+      response = await aiFetch(CLAUDE_URL, {
         method: 'POST',
         headers: buildHeaders(),
         body: JSON.stringify(bare),
@@ -455,7 +436,6 @@ Generate a study schedule with at most ${Math.min(5, Math.max(1, daysToExam + 1)
 
 // ── generateReport ───────────────────────────────────────────────────────────
 export const generateReport = async (snapshot: StudySnapshot): Promise<GeneratedReport> => {
-  const apiKey = getApiKey();
 
   const avgScore =
     snapshot.quizSessions.length === 0
@@ -505,10 +485,9 @@ Return this exact JSON structure:
   "confidenceCalibration": "well-calibrated"
 }`;
 
-  if (!apiKey) return buildMockReport(snapshot);
 
   console.log(`Using Anthropic model: ${ANTHROPIC_MODEL}`);
-  const response = await fetch(CLAUDE_URL, {
+  const response = await aiFetch(CLAUDE_URL, {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify({
@@ -520,6 +499,8 @@ Return this exact JSON structure:
     }),
   });
 
+  // Same as the old "no API key" path: the backend has no ANTHROPIC_API_KEY configured.
+  if (response.status === 503) return buildMockReport(snapshot);
   if (!response.ok) {
     throw new Error(`Claude API error ${response.status}: ${response.statusText}`);
   }
@@ -813,7 +794,7 @@ export const evaluateDefense = async (
     }],
   };
 
-  let res = await fetch(CLAUDE_URL, {
+  let res = await aiFetch(CLAUDE_URL, {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify(body),
@@ -824,7 +805,7 @@ export const evaluateDefense = async (
       thinking?: unknown;
       output_config?: unknown;
     };
-    res = await fetch(CLAUDE_URL, {
+    res = await aiFetch(CLAUDE_URL, {
       method: 'POST',
       headers: buildHeaders(),
       body: JSON.stringify(bare),

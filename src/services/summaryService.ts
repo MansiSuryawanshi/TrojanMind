@@ -16,21 +16,13 @@ import type {
   ChatMessage,
 } from '../types/summary';
 
-const CLAUDE_URL = '/anthropic/v1/messages';
+import { AI_ENDPOINT as CLAUDE_URL, aiFetch } from './aiClient';
 const TARGET_CHUNK_CHARS = 5500;
 const MAX_RETRIES = 2;
 
-function getApiKey(): string {
-  return import.meta.env.VITE_CLAUDE_API_KEY as string;
-}
-
+// The API key lives only on the backend; aiFetch adds the user's ID token.
 function buildHeaders() {
-  return {
-    'Content-Type': 'application/json',
-    'x-api-key': getApiKey(),
-    'anthropic-version': '2023-06-01',
-    'anthropic-dangerous-direct-browser-access': 'true',
-  };
+  return { 'Content-Type': 'application/json' };
 }
 
 function messageText(data: { content?: { type?: string; text?: string }[] }): string {
@@ -230,8 +222,6 @@ async function callClaude(
   maxTokens: number,
   system?: string
 ): Promise<string> {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error('Claude API key missing. Add VITE_CLAUDE_API_KEY to .env');
 
   let lastErr = '';
 
@@ -244,7 +234,7 @@ async function callClaude(
       messages: [{ role: 'user' as const, content: prompt }],
     };
 
-    let response = await fetch(CLAUDE_URL, {
+    let response = await aiFetch(CLAUDE_URL, {
       method: 'POST',
       headers: buildHeaders(),
       body: JSON.stringify(body),
@@ -255,7 +245,7 @@ async function callClaude(
       const errText = await response.text();
       lastErr = errText;
       if (/thinking|effort|output_config|not_found|model/i.test(errText)) {
-        response = await fetch(CLAUDE_URL, {
+        response = await aiFetch(CLAUDE_URL, {
           method: 'POST',
           headers: buildHeaders(),
           body: JSON.stringify({
@@ -279,7 +269,7 @@ async function callClaude(
     // Auth / credit issues — don't keep trying other models
     if (response.status === 401 || response.status === 403) {
       throw new Error(
-        `Claude API auth error ${response.status}. Check VITE_CLAUDE_API_KEY in .env.`
+        `Claude API auth error ${response.status}. Check ANTHROPIC_API_KEY in server/.env.local.`
       );
     }
     if (response.status === 429) {

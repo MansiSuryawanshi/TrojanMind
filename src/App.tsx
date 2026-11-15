@@ -16,6 +16,7 @@ import { saveDocument } from './services/firebaseService';
 import type { SaveDocumentMeta } from './services/firebaseService';
 import { InitialDataLoader } from './components/InitialDataLoader';
 import MyCourses from './components/MyCourses';
+import MyMaterials from './components/MyMaterials';
 import './index.css';
 
 const DEMO_SESSION = {
@@ -42,6 +43,21 @@ const App: React.FC = () => {
   const setSession = useStore((state) => state.setSession);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [challengeSessionKey, setChallengeSessionKey] = useState<number>(0);
+  // Saved workspace open on My Materials, and a study document to preselect in Challenge.
+  const [openWorkspaceId, setOpenWorkspaceId] = useState<string | null>(null);
+  const [challengeDocIds, setChallengeDocIds] = useState<string[]>([]);
+
+  const openWorkspace = (id: string | null) => {
+    setOpenWorkspaceId(id);
+    setActiveTab(HOME_TABS.materials);
+    window.scrollTo({ top: 0 });
+  };
+
+  const startChallengeWith = (documentId: string) => {
+    setChallengeDocIds([documentId]);
+    setChallengeSessionKey((prev) => prev + 1);
+    navigateFromHome(HOME_TABS.challenge);
+  };
 
   useEffect(() => { 
     setSession(DEMO_SESSION); 
@@ -115,7 +131,14 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <InitialDataLoader />
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Navbar
+        activeTab={activeTab}
+        setActiveTab={(tab) => {
+          // The My Materials nav item always opens the history list.
+          if (tab === HOME_TABS.materials) setOpenWorkspaceId(null);
+          setActiveTab(tab);
+        }}
+      />
       <main>
         {activeTab === HOME_TABS.home && (
           <div className="animate-fade-in">
@@ -160,7 +183,7 @@ const App: React.FC = () => {
         )}
         {activeTab === HOME_TABS.challenge && (
           <div className="container mx-auto px-4 sm:px-6 py-6 animate-fade-in">
-            <ReasoningChallenge key={challengeSessionKey} onAddMaterial={() => navigateFromHome(HOME_TABS.upload)} />
+            <ReasoningChallenge key={challengeSessionKey} preselectDocumentIds={challengeDocIds} onAddMaterial={() => navigateFromHome(HOME_TABS.upload)} />
           </div>
         )}
         {activeTab === HOME_TABS.examPrep && (
@@ -175,7 +198,16 @@ const App: React.FC = () => {
           <StudySchedule onSwitchToChallenge={() => setActiveTab(HOME_TABS.challenge)} />
         )}
         {activeTab === HOME_TABS.report && <StudyReport />}
-        {activeTab === HOME_TABS.courses && <MyCourses onUpload={() => navigateFromHome(HOME_TABS.upload)} />}
+        {activeTab === HOME_TABS.courses && <MyCourses onUpload={() => navigateFromHome(HOME_TABS.upload)} onOpenWorkspace={openWorkspace} />}
+        {activeTab === HOME_TABS.materials && (
+          <MyMaterials
+            openWorkspaceId={openWorkspaceId}
+            onOpenWorkspace={openWorkspace}
+            onNavigate={navigateFromHome}
+            onChallenge={startChallengeWith}
+            onUpload={() => navigateFromHome(HOME_TABS.upload)}
+          />
+        )}
       </main>
     </div>
   );

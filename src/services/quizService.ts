@@ -13,7 +13,7 @@ export interface GeneratedQuestion {
 
 import { ANTHROPIC_MODEL, ANTHROPIC_FALLBACK_MODEL } from "../config/aiConfig";
 
-const CLAUDE_URL = '/anthropic/v1/messages';
+import { AI_ENDPOINT as CLAUDE_URL, aiFetch } from './aiClient';
 
 /** Strip PDF page markers and noise so quizzes never quote "--- Page 1 ---". */
 export function cleanContentForQuiz(content: string): string {
@@ -90,20 +90,13 @@ export function validateQuestionQuality(q: GeneratedQuestion): boolean {
 }
 
 async function callQuizClaude(prompt: string, maxTokens = 3500): Promise<string> {
-  const apiKey = import.meta.env.VITE_CLAUDE_API_KEY as string;
-  if (!apiKey) throw new Error('Missing VITE_CLAUDE_API_KEY');
 
   const models = [ANTHROPIC_MODEL, ANTHROPIC_FALLBACK_MODEL, 'claude-sonnet-5', 'claude-haiku-5-5'];
   let lastErr = '';
 
   for (const model of models) {
     const isSonnet55 = /sonnet-5-5/i.test(model);
-    const headers = {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    };
+    const headers = { 'Content-Type': 'application/json' };
     const base = {
       model,
       max_tokens: maxTokens,
@@ -112,7 +105,7 @@ async function callQuizClaude(prompt: string, maxTokens = 3500): Promise<string>
       messages: [{ role: 'user', content: prompt }],
     };
 
-    let response = await fetch(CLAUDE_URL, {
+    let response = await aiFetch(CLAUDE_URL, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -124,7 +117,7 @@ async function callQuizClaude(prompt: string, maxTokens = 3500): Promise<string>
 
     if (!response.ok && (response.status === 400 || response.status === 404)) {
       lastErr = await response.text();
-      response = await fetch(CLAUDE_URL, {
+      response = await aiFetch(CLAUDE_URL, {
         method: 'POST',
         headers,
         body: JSON.stringify(base),
@@ -138,7 +131,7 @@ async function callQuizClaude(prompt: string, maxTokens = 3500): Promise<string>
 
     lastErr = await response.text();
     if (response.status === 401 || response.status === 403) {
-      throw new Error(`Claude API auth error ${response.status}: check VITE_CLAUDE_API_KEY`);
+      throw new Error(`Claude API auth error ${response.status}: check ANTHROPIC_API_KEY in server/.env.local`);
     }
     if (response.status === 429) {
       await new Promise((r) => setTimeout(r, 1200));

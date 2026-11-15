@@ -58,7 +58,7 @@ const UploadPrompt: React.FC<{ onUpload: () => void }> = ({ onUpload }) => (
   </section>
 );
 
-const MyCourses: React.FC<{ onUpload?: () => void }> = ({ onUpload }) => {
+const MyCourses: React.FC<{ onUpload?: () => void; onOpenWorkspace?: (id: string) => void }> = ({ onUpload, onOpenWorkspace }) => {
   const { connection, status } = useBrightspace();
 
   if (connection.resolving) {
@@ -84,7 +84,7 @@ const MyCourses: React.FC<{ onUpload?: () => void }> = ({ onUpload }) => {
     );
   }
 
-  return <LocalDemoCourses onUpload={onUpload} />;
+  return <LocalDemoCourses onUpload={onUpload} onOpenWorkspace={onOpenWorkspace} />;
 };
 
 const Shell: React.FC<{ badge?: React.ReactNode; children: React.ReactNode }> = ({ badge, children }) => (
@@ -139,7 +139,7 @@ const IndividualConnectionPanel: React.FC = () => (
 );
 
 /** The owner-only local demo connector: unchanged behavior, clearly labeled. */
-const LocalDemoCourses: React.FC<{ onUpload?: () => void }> = ({ onUpload }) => {
+const LocalDemoCourses: React.FC<{ onUpload?: () => void; onOpenWorkspace?: (id: string) => void }> = ({ onUpload, onOpenWorkspace }) => {
   const { user } = useAuth();
   const { connection, status, connect, selections } = useBrightspace();
   const busy = status.kind === 'connecting';
@@ -152,7 +152,7 @@ const LocalDemoCourses: React.FC<{ onUpload?: () => void }> = ({ onUpload }) => 
   };
 
   if (open) {
-    return <CourseDetail key={open.course.id} course={open.course} semesterLabel={open.semesterLabel} onBack={backToList} />;
+    return <CourseDetail key={open.course.id} course={open.course} semesterLabel={open.semesterLabel} onBack={backToList} onOpenWorkspace={onOpenWorkspace} onUpload={onUpload} />;
   }
 
   const buttonLabel =

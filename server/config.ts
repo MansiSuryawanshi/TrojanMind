@@ -43,6 +43,12 @@ export const BRIGHTSPACE_BASE_URL = trimmed('BRIGHTSPACE_BASE_URL');
 export const HAS_ADMIN_CREDENTIALS = Boolean(trimmed('GOOGLE_APPLICATION_CREDENTIALS'));
 
 /**
+ * Claude API key for TrojanMind's AI features. Server-only: the browser calls
+ * POST /ai/messages with its Firebase ID token and never sees this value.
+ */
+export const ANTHROPIC_API_KEY = trimmed('ANTHROPIC_API_KEY');
+
+/**
  * How to launch the MCP server. Default is the package's documented Windows
  * command: `cmd /c npx -y brightspace-mcp-server@latest` (plain `npx` elsewhere).
  */

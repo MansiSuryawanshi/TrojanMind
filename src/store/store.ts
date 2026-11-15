@@ -64,6 +64,9 @@ export interface SessionState {
   setSummaryBridge: (patch: Partial<SummaryBridge>) => void;
   setRevisionTasks: (tasks: RevisionTask[]) => void;
   addRevisionTaskLocal: (task: RevisionTask) => void;
+
+  /** Drop every user-specific value (called on logout / account switch). */
+  resetUserState: () => void;
 }
 
 const defaultBridge: SummaryBridge = {
@@ -74,6 +77,23 @@ const defaultBridge: SummaryBridge = {
   summaryReviewedCount: 0,
   flashcardsReviewedCount: 0,
 };
+
+const userDefaults = () => ({
+  session: null,
+  schedule: null,
+  currentQuiz: null,
+  examDate: null,
+  daysLeft: null,
+  allAttempts: [],
+  isInitialLoadComplete: false,
+  readinessScore: 50,
+  weakAreas: [],
+  topicProgress: [],
+  crossExamHistory: [],
+  quizAnswers: [],
+  summaryBridge: { ...defaultBridge },
+  revisionTasks: [],
+});
 
 export const useStore = create<SessionState>((set) => ({
   session: null,
@@ -130,4 +150,6 @@ export const useStore = create<SessionState>((set) => ({
   setRevisionTasks: (revisionTasks) => set({ revisionTasks }),
   addRevisionTaskLocal: (task) =>
     set((state) => ({ revisionTasks: [...state.revisionTasks, task] })),
+
+  resetUserState: () => set(userDefaults()),
 }));

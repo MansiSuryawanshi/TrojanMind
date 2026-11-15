@@ -15,6 +15,7 @@ interface NavbarProps {
 const navItems = [
   { label: 'Home', index: HOME_TABS.home },
   { label: 'My Courses', index: HOME_TABS.courses, alsoActiveFor: [HOME_TABS.upload] },
+  { label: 'My Materials', index: HOME_TABS.materials },
   { label: 'Summary', index: HOME_TABS.summary },
   { label: 'Challenge', index: HOME_TABS.challenge },
   { label: 'Exam Prep', index: HOME_TABS.examPrep },

@@ -12,10 +12,11 @@ import {
   type Course,
   type CourseContentResult,
   type CourseSelection,
+  type ImportEvent,
   type SelectedMaterial,
   type UsedMaterials,
 } from './brightspaceContext';
-import { courseContentEndpoint, toCourseContent } from './contentApi';
+import { courseContentEndpoint, courseImportEndpoint, toCourseContent, toImportEvent } from './contentApi';
 
 // Proxied by the Vite dev server to the localhost-only connector (server/index.ts).
 const CONNECT_ENDPOINT = '/local-api/brightspace/connect';
@@ -261,6 +262,67 @@ const Inner: React.FC<{ user: User; children: React.ReactNode }> = ({ user, chil
     return { ok: false, kind: 'error', code, message };
   }, []);
 
+  /**
+   * Stream an import from the connector. Errors before the stream starts
+   * (access, identity, busy) arrive as a single `error` event.
+   */
+  const importMaterials = useCallback(async (courseId: number, keys: string[], onEvent: (e: ImportEvent) => void | Promise<void>) => {
+    let res: Response;
+    try {
+      const token = await userRef.current.getIdToken();
+      res = await fetch(courseImportEndpoint(courseId), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keys }),
+        cache: 'no-store',
+      });
+    } catch {
+      await onEvent({ type: 'error', code: 'unreachable', message: 'The local connector isn’t reachable. Start it with `npm run server`.' });
+      return;
+    }
+    if (!res.ok || !res.body || !(res.headers.get('content-type') ?? '').includes('application/x-ndjson')) {
+      const json = await readJson(res);
+      const err = ((json as Record<string, unknown> | null)?.error ?? {}) as Record<string, unknown>;
+      const code = json ? asString(err.code, `http_${res.status}`) : 'unreachable';
+      const message = code === 'not_owner' ? NOT_OWNER_MESSAGE
+        : code === 'unreachable' ? 'The local connector isn’t reachable. Start it with `npm run server`.'
+        : code === 'not_found' ? 'The running connector predates material import. Restart `npm run server`.'
+        : asString(err.message, 'The import couldn’t start.');
+      await onEvent({ type: 'error', code, message });
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let ended = false;
+    const handle = async (line: string) => {
+      if (!line.trim()) return;
+      let parsed: unknown;
+      try { parsed = JSON.parse(line); } catch { return; }
+      const ev = toImportEvent(parsed);
+      if (!ev) return;
+      if (ev.type === 'done' || ev.type === 'error') ended = true;
+      await onEvent(ev);
+    };
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          await handle(line);
+        }
+      }
+      await handle(buf + decoder.decode());
+    } catch {
+      /* connection dropped: reported below */
+    }
+    if (!ended) await onEvent({ type: 'error', code: 'stream_interrupted', message: 'The connection to the local connector was interrupted.' });
+  }, []);
+
   // Selections live only in memory inside this per-UID provider: separate per
   // course, and discarded on logout or account switch (the provider unmounts).
   const [selections, setSelections] = useState<Record<number, CourseSelection>>({});
@@ -282,8 +344,8 @@ const Inner: React.FC<{ user: User; children: React.ReactNode }> = ({ user, chil
   }, [method, status, wasConnected, available, resolving]);
 
   const value = useMemo<BrightspaceContextValue>(
-    () => ({ connection, status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials }),
-    [connection, status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials],
+    () => ({ connection, status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials, importMaterials }),
+    [connection, status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials, importMaterials],
   );
   return <BrightspaceContext.Provider value={value}>{children}</BrightspaceContext.Provider>;
 };
@@ -297,6 +359,7 @@ const SIGNED_OUT_VALUE: BrightspaceContextValue = {
   setCourseSelection: () => undefined,
   usedMaterials: {},
   saveUsedMaterials: () => undefined,
+  importMaterials: async (_c, _k, onEvent) => { await onEvent({ type: 'error', code: 'signed_out', message: 'Sign in to TrojanMind first.' }); },
 };
 
 /**

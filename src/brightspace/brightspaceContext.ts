@@ -136,6 +136,30 @@ export interface UsedMaterials {
   savedAt: string;
 }
 
+/** One retrieved (or not retrieved) item from POST /brightspace/courses/:id/import. */
+export interface ImportedItem {
+  index: number;
+  key: string;
+  topicId: number | null;
+  title: string;
+  moduleTitle: string;
+  sourceType: SourceType;
+  url: string | null;
+  status: 'imported' | 'link_only' | 'failed';
+  reason: string | null;
+  method: 'download_file' | 'page_body' | null;
+  text: string | null;
+  truncated: boolean;
+  pages: number | null;
+}
+
+export type ImportEvent =
+  | { type: 'start'; course: { id: number; name: string; code: string | null }; total: number }
+  | { type: 'item'; item: ImportedItem }
+  | { type: 'done' }
+  /** Fatal: the import stopped. Items already received are kept. */
+  | { type: 'error'; code: string; message: string };
+
 export interface BrightspaceContextValue {
   /** Provider-independent summary of this user's connection. */
   connection: BrightspaceConnection;
@@ -151,6 +175,8 @@ export interface BrightspaceContextValue {
   /** Confirmed selections (“Use selected materials”), per course. */
   usedMaterials: Record<number, UsedMaterials>;
   saveUsedMaterials: (courseId: number, items: SelectedMaterial[]) => void;
+  /** Import the selected items' readable text; events arrive per item. Resolves when the stream ends. */
+  importMaterials: (courseId: number, keys: string[], onEvent: (e: ImportEvent) => void | Promise<void>) => Promise<void>;
 }
 
 export const BrightspaceContext = createContext<BrightspaceContextValue | null>(null);

@@ -9,7 +9,7 @@ import {
   removeDocument,
   removeDocuments,
   saveQuizAttempt,
-  USER_ID,
+  getUserId,
   type StudyDocument 
 } from '../services/firebaseService';
 import { generateQuizFromContent, generateClaudeCompetitorAnswers, generateFallbackQuiz } from '../services/quizService';
@@ -44,7 +44,7 @@ interface QuestionResult {
   topic?: string;
 }
 
-const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMaterial }) => {
+const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void; preselectDocumentIds?: string[] }> = ({ onAddMaterial, preselectDocumentIds }) => {
   const allAttempts = useStore((s) => s.allAttempts);
   const [phase, setPhase] = useState<QuizPhase>('selection');
   const [loadingStep, setLoadingStep] = useState<LoadingStep>('reading');
@@ -58,7 +58,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
   // Multiplayer / Competitor State
   const [session, setSessionState] = useState<ChallengeSession | null>(null);
   const [isHost, setIsHost] = useState(false);
-  const [activeReviewPlayer, setActiveReviewPlayer] = useState<string>(USER_ID);
+  const [activeReviewPlayer, setActiveReviewPlayer] = useState<string>(getUserId());
   const [isSoloMode, setIsSoloMode] = useState(false);
   const [savedAttemptId, setSavedAttemptId] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
@@ -82,6 +82,9 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
   const loadDocs = async () => {
     const docs = await listUserDocuments();
     setDocuments(docs);
+    // Opened from a saved workspace: preselect its study document.
+    const pre = (preselectDocumentIds ?? []).filter((id) => docs.some((d) => d.id === id));
+    if (pre.length) setSelectedDocIds(new Set(pre));
     if (docs.length === 0) setPhase('no-content');
     else if (phase === 'no-content') setPhase('selection');
   };
@@ -99,7 +102,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
         return;
       }
 
-      const joinedSession = await joinChallengeSession(code, USER_ID, `Student #${Math.floor(Math.random() * 999)}`);
+      const joinedSession = await joinChallengeSession(code, getUserId(), `Student #${Math.floor(Math.random() * 999)}`);
       if (joinedSession) {
         console.log(`[Challenge-Pipeline] Join SUCCESS. Role: Guest.`);
         setSessionState(joinedSession);
@@ -221,7 +224,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
     console.log(`[Challenge] Creating ${isSoloMode ? 'solo' : 'multiplayer'} room...`);
     const selected = documents.filter(d => selectedDocIds.has(d.id!));
     const newSession = await createChallengeSession(
-      USER_ID, 
+      getUserId(), 
       "Host (You)", 
       Array.from(selectedDocIds), 
       selected.map(d => d.fileName),
@@ -425,7 +428,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
       console.group("[Challenge] Quiz Persistence Analysis");
       console.log(`Quiz completed. Detected ${totalQuestions} questions.`);
       console.log(`Summary: ${correctCount} Correct, ${totalQuestions - correctCount} Wrong, ${accuracy}% Accuracy.`);
-      console.log(`Saving to: users/${USER_ID}/quizAttempts`);
+      console.log(`Saving to: users/${getUserId()}/quizAttempts`);
       console.log("Payload Sample:", {
         score: attempt.score,
         accuracy: attempt.accuracy,
@@ -438,7 +441,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
       
       // Analytics Logging
       console.group("[Challenge-ANALYTICS] Session Summary");
-      console.log(`User: ${USER_ID} | Score: ${attempt.score} | Accuracy: ${attempt.accuracy}%`);
+      console.log(`User: ${getUserId()} | Score: ${attempt.score} | Accuracy: ${attempt.accuracy}%`);
       console.log(`Questions: ${totalQuestions} | Correct: ${correctCount}`);
       console.log(`Attempt ID: ${attemptId}`);
       console.groupEnd();
@@ -455,10 +458,10 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
     }
 
     if (session) {
-      console.log(`[Challenge] Participant finished multiplayer. Submitting results for: ${USER_ID}`);
-      await submitParticipantResults(session.id, USER_ID, participantResults);
+      console.log(`[Challenge] Participant finished multiplayer. Submitting results for: ${getUserId()}`);
+      await submitParticipantResults(session.id, getUserId(), participantResults);
       
-      const updatedParticipants = { ...session.participants, [USER_ID]: { ...session.participants[USER_ID], results: participantResults, status: 'finished' } };
+      const updatedParticipants = { ...session.participants, [getUserId()]: { ...session.participants[getUserId()], results: participantResults, status: 'finished' } };
       const allFinished = Object.values(updatedParticipants).every(p => p.status === 'finished');
       
       if (allFinished) {
@@ -696,14 +699,14 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
             <h3 className="text-xs font-bold text-muted uppercase tracking-widest">{isSoloMode ? "Competitors" : `Joined Players (${players.length})`}</h3>
             <div className="grid gap-3">
               {players.map((p, i) => (
-                <div key={p.uid || i} className={`p-4 rounded-xl border flex items-center justify-between ${p.uid === USER_ID ? 'bg-cardinal-soft border-cardinal/30' : 'bg-surface border-line'}`}>
+                <div key={p.uid || i} className={`p-4 rounded-xl border flex items-center justify-between ${p.uid === getUserId() ? 'bg-cardinal-soft border-cardinal/30' : 'bg-surface border-line'}`}>
                    <div className="flex items-center gap-3">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${p.isHost ? 'bg-cardinal text-gold' : 'bg-success-soft text-success'}`}>
                         {p.name ? p.name[0] : '?'}
                       </div>
                       <div className="flex flex-col">
                         <span className="font-bold text-ink text-sm">
-                          {p.name} {p.uid === USER_ID && "(You)"}
+                          {p.name} {p.uid === getUserId() && "(You)"}
                         </span>
                         {p.isHost && <span className="text-[10px] font-bold text-cardinal uppercase tracking-widest">Room Host</span>}
                       </div>
@@ -794,7 +797,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
             )}
           </div>
           <h2 className="text-4xl md:text-6xl font-extrabold text-ink tracking-tight mb-3">
-            {!hasAnyPoints ? "No One Won! 😅" : (winner?.uid === USER_ID ? "Victory! 🏆" : (winner?.uid === 'claude_ai' ? "Claude AI Wins! 🤖" : `${winner?.name || 'Player'} Wins!`))}
+            {!hasAnyPoints ? "No One Won! 😅" : (winner?.uid === getUserId() ? "Victory! 🏆" : (winner?.uid === 'claude_ai' ? "Claude AI Wins! 🤖" : `${winner?.name || 'Player'} Wins!`))}
           </h2>
           <p className="text-muted font-medium text-lg">{!hasAnyPoints ? "Everyone finished with 0 pts. Practice makes perfect!" : (session?.claudeCompetitor ? "Against the Grandmaster Claude AI" : "Live Challenge Comparison")}</p>
           {savedAttemptId && <p className="text-xs text-muted font-semibold mt-3 uppercase tracking-wider">Attempt Saved: {savedAttemptId}</p>}
@@ -808,7 +811,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
               {leaderboard.map((p, i) => (
                 <div 
                   key={i} 
-                  className={`p-4 md:p-6 rounded-xl border flex items-center justify-between gap-4 ${p.uid === USER_ID ? 'border-cardinal bg-cardinal-soft' : (p.uid === 'claude_ai' ? 'border-gold/60 bg-gold-soft' : 'border-line bg-surface')}`}
+                  className={`p-4 md:p-6 rounded-xl border flex items-center justify-between gap-4 ${p.uid === getUserId() ? 'border-cardinal bg-cardinal-soft' : (p.uid === 'claude_ai' ? 'border-gold/60 bg-gold-soft' : 'border-line bg-surface')}`}
                 >
                   <div className="flex items-center gap-4 md:gap-6 min-w-0">
                     <span className={`text-2xl md:text-4xl font-extrabold w-10 shrink-0 ${i === 0 ? 'text-gold-ink' : 'text-muted'}`}>#{i + 1}</span>
@@ -859,7 +862,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
                  </div>
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm font-semibold">
                     <div className="p-4 rounded-xl bg-canvas border border-line">
-                       <p className="text-muted uppercase tracking-wider text-[10px] mb-2">{activeReviewPlayer === USER_ID ? "Your Answer" : `${session?.participants[activeReviewPlayer]?.name || 'Player'}'s Answer`}</p>
+                       <p className="text-muted uppercase tracking-wider text-[10px] mb-2">{activeReviewPlayer === getUserId() ? "Your Answer" : `${session?.participants[activeReviewPlayer]?.name || 'Player'}'s Answer`}</p>
                        <p className={isCorrect ? 'text-success' : 'text-danger'}>{userAns || "Missing"}</p>
                     </div>
                     <div className="p-4 rounded-xl bg-canvas border border-line">

@@ -152,7 +152,9 @@ export const Summary: React.FC<SummaryProps> = ({
       const docs = await listUserDocuments();
       setDocuments(docs);
       if (docs.length && !selectedId) {
-        setSelectedId(docs[0].id || '');
+        // Opened from a saved workspace (or a previous visit): keep that document.
+        const preferred = useStore.getState().summaryBridge.documentId;
+        setSelectedId(preferred && docs.some((d) => d.id === preferred) ? preferred : docs[0].id || '');
       }
     } catch (e: any) {
       setError(e?.message || 'Failed to load documents');

@@ -1,0 +1,59 @@
+rules_version = '2';
+
+// TrojanMind Firestore rules. Deploy with:  npx firebase-tools deploy --only firestore:rules
+//
+// - Everything under users/{uid} is readable and writable only by that signed-in,
+//   email-verified user. This covers saved material workspaces, their imported
+//   text chunks, study documents, summaries, flashcards, quiz/report history.
+// - Challenge rooms (sessions) are shared between participants by design.
+// - Everything else, including the legacy shared "users/guest_user" path used
+//   by earlier builds, is denied. That data is kept in Firestore, just not served.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function verified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function isOwner(uid) {
+      return verified() && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      // Saved material workspace: metadata + per-item status (no full text here).
+      match /workspaces/{workspaceId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.title is string
+          && request.resource.data.title.size() <= 200
+          && request.resource.data.items is list
+          && request.resource.data.items.size() <= 25;
+
+        // Imported text, chunked to stay far below the 1 MiB document limit.
+        match /texts/{chunkId} {
+          allow read, delete: if isOwner(uid);
+          allow create, update: if isOwner(uid)
+            && request.resource.data.text is string
+            && request.resource.data.text.size() <= 200000
+            && request.resource.data.itemIndex is int
+            && request.resource.data.chunk is int;
+        }
+      }
+
+      // All other per-user collections (documents, summaries, quizAttempts, ...).
+      match /{collection}/{docId} {
+        allow read, write: if isOwner(uid) && collection != 'workspaces';
+      }
+      match /{collection}/{docId}/{rest=**} {
+        allow read, write: if isOwner(uid) && collection != 'workspaces';
+      }
+    }
+
+    // Multiplayer challenge rooms: any verified user may join by room code;
+    // only the host may delete.
+    match /sessions/{sessionId} {
+      allow read, create, update: if verified();
+      allow delete: if verified() && resource.data.hostId == request.auth.uid;
+    }
+  }
+}

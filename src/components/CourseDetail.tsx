@@ -1,13 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, BookOpen, ChevronRight, Clock, ExternalLink, EyeOff, FileText, Folder,
-  FolderOpen, Globe, Info, Link2, Lock, RefreshCw, Video,
+  AlertTriangle, ArrowLeft, BookOpen, CheckCircle2, ChevronRight, Clock, Download, ExternalLink, EyeOff, FileText, Folder,
+  FolderOpen, Globe, Info, Link2, Loader2, Lock, RefreshCw, Upload, Video, XCircle,
 } from 'lucide-react';
 import { useBrightspace } from '../brightspace/useBrightspace';
 import type {
   ContentModule, ContentTopic, Course, CourseContent, CourseContentResult, SelectedMaterial, SourceType,
 } from '../brightspace/brightspaceContext';
-import { SOURCE_TYPE_INFO, safeHttpUrl, topicsIn } from '../brightspace/contentApi';
+import { IMPORT_REASON_TEXT, LINK_ONLY_NOTE, SOURCE_TYPE_INFO, safeHttpUrl, topicsIn } from '../brightspace/contentApi';
+import { useWorkspaceImport, type ImportRun } from '../hooks/useWorkspaceImport';
+import type { WorkspaceItem } from '../services/workspaceService';
+
+/** Mirrors server/materialImport.ts MAX_IMPORT_ITEMS. */
+const MAX_IMPORT_ITEMS = 25;
 
 type LoadState =
   | { kind: 'loading' }
@@ -36,7 +41,7 @@ const SOURCE_TONE: Record<SourceType, string> = {
   unavailable: 'bg-sunken text-muted border-line',
 };
 
-const SourceBadge: React.FC<{ type: SourceType }> = ({ type }) => {
+export const SourceBadge: React.FC<{ type: SourceType }> = ({ type }) => {
   const Icon = SOURCE_ICON[type];
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold whitespace-nowrap ${SOURCE_TONE[type]}`}>
@@ -46,7 +51,7 @@ const SourceBadge: React.FC<{ type: SourceType }> = ({ type }) => {
 };
 
 /** Opens a source in a new tab. Renders nothing unless the URL is safe http(s). */
-const SourceLink: React.FC<{ url: string | null; title: string; compact?: boolean }> = ({ url, title, compact }) => {
+export const SourceLink: React.FC<{ url: string | null; title: string; compact?: boolean }> = ({ url, title, compact }) => {
   const href = safeHttpUrl(url);
   if (!href) return null;
   return (
@@ -67,7 +72,13 @@ function toMaterial(t: ContentTopic, moduleTitle: string): SelectedMaterial {
   return { key: t.key, title: t.title, sourceType: t.sourceType, url: t.url, sourceUrl: t.sourceUrl, moduleTitle, topicType: t.topicType, origin: t.origin };
 }
 
-const CourseDetail: React.FC<{ course: Course; semesterLabel: string; onBack: () => void }> = ({ course, semesterLabel, onBack }) => {
+const CourseDetail: React.FC<{
+  course: Course;
+  semesterLabel: string;
+  onBack: () => void;
+  onOpenWorkspace?: (id: string) => void;
+  onUpload?: () => void;
+}> = ({ course, semesterLabel, onBack, onOpenWorkspace, onUpload }) => {
   const { fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials } = useBrightspace();
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
@@ -156,7 +167,7 @@ const CourseDetail: React.FC<{ course: Course; semesterLabel: string; onBack: ()
         {load.kind === 'failed' && <LoadError result={load.result} onRetry={retry} onBack={onBack} />}
 
         {load.kind === 'ready' && view === 'review' && used && (
-          <ReviewPanel items={used.items} savedAt={used.savedAt} onEdit={() => setView('browse')} />
+          <ReviewPanel course={course} items={used.items} savedAt={used.savedAt} onEdit={() => setView('browse')} onOpenWorkspace={onOpenWorkspace} onUpload={onUpload} />
         )}
 
         {load.kind === 'ready' && view === 'browse' && (
@@ -395,21 +406,59 @@ const REVIEW_ORDER: SourceType[] = [
   'brightspace_file', 'brightspace_page', 'google_doc', 'google_drive_file', 'google_drive_folder', 'recording_lti', 'external_link', 'unavailable',
 ];
 
-const ReviewPanel: React.FC<{ items: SelectedMaterial[]; savedAt: string; onEdit: () => void }> = ({ items, savedAt, onEdit }) => {
+const RETRIEVABLE: ReadonlySet<SourceType> = new Set(['brightspace_file', 'brightspace_page']);
+
+const ReviewPanel: React.FC<{
+  course: Course;
+  items: SelectedMaterial[];
+  savedAt: string;
+  onEdit: () => void;
+  onOpenWorkspace?: (id: string) => void;
+  onUpload?: () => void;
+}> = ({ course, items, savedAt, onEdit, onOpenWorkspace, onUpload }) => {
+  const { run, start, busy } = useWorkspaceImport();
   const groups = REVIEW_ORDER
     .map((type) => ({ type, items: items.filter((i) => i.sourceType === type) }))
     .filter((g) => g.items.length > 0);
+  const retrievable = items.filter((i) => RETRIEVABLE.has(i.sourceType)).length;
+  const tooMany = items.length > MAX_IMPORT_ITEMS;
+
+  if (run.phase === 'running' || run.phase === 'done') {
+    return <ImportProgressPanel run={run} onOpenWorkspace={onOpenWorkspace} onEdit={onEdit} onUpload={onUpload} />;
+  }
 
   return (
     <section aria-labelledby="review-title" className="grid gap-4">
       <div className="rounded-2xl border border-gold/60 bg-gold-soft p-5">
         <h2 id="review-title" className="font-bold text-gold-ink text-lg">Selected references ({items.length})</h2>
         <p className="text-sm text-ink mt-1 leading-relaxed">
-          These are <strong>links to your selected course materials</strong>, saved in TrojanMind for this session only.
-          Nothing has been downloaded, imported, or read from them yet: no files were fetched, no Drive folders were
-          opened, and no recordings were transcribed.
+          These are <strong>links to your selected course materials</strong>. Nothing has been read from them yet.
+          <strong> Import selected materials</strong> retrieves readable text for Brightspace-hosted files and pages
+          ({retrievable} of {items.length} selected) and saves everything to <strong>My Materials</strong>. Google Drive,
+          Google Docs, recordings, and external links are saved as links only.
         </p>
-        <p className="text-xs text-muted mt-2">Saved {new Date(savedAt).toLocaleTimeString()}</p>
+        <p className="text-xs text-muted mt-2">Selected {new Date(savedAt).toLocaleTimeString()}</p>
+      </div>
+
+      {run.phase === 'failed' && (
+        <div role="alert" className="rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-ink flex gap-2">
+          <AlertTriangle size={16} className="text-danger shrink-0 mt-0.5" aria-hidden="true" /> {run.error}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void start(course, items)}
+          disabled={busy || tooMany}
+          className="btn-primary px-4 py-2 rounded-lg text-sm font-semibold"
+        >
+          <Download size={14} aria-hidden="true" /> Import selected materials
+        </button>
+        <button type="button" onClick={onEdit} className="btn-secondary px-4 py-2 rounded-lg text-sm font-semibold">
+          <ArrowLeft size={14} aria-hidden="true" /> Edit selection
+        </button>
+        {tooMany && <span className="text-xs text-warning">Select at most {MAX_IMPORT_ITEMS} items per import.</span>}
       </div>
 
       {groups.map((g) => (
@@ -434,14 +483,91 @@ const ReviewPanel: React.FC<{ items: SelectedMaterial[]; savedAt: string; onEdit
           </ul>
         </div>
       ))}
-
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onEdit} className="btn-secondary px-4 py-2 rounded-lg text-sm font-semibold">
-          <ArrowLeft size={14} aria-hidden="true" /> Edit selection
-        </button>
-      </div>
     </section>
   );
+};
+
+/** Per-item import progress, then a summary with a link to the saved workspace. */
+const ImportProgressPanel: React.FC<{
+  run: Extract<ImportRun, { phase: 'running' | 'done' }>;
+  onOpenWorkspace?: (id: string) => void;
+  onEdit: () => void;
+  onUpload?: () => void;
+}> = ({ run, onOpenWorkspace, onEdit, onUpload }) => {
+  const imported = run.items.filter((i) => i.status === 'imported').length;
+  const linkOnly = run.items.filter((i) => i.status === 'link_only').length;
+  const failed = run.items.filter((i) => i.status === 'failed').length;
+  const done = run.phase === 'done';
+  return (
+    <section aria-labelledby="import-title" className="grid gap-4">
+      <div className={`rounded-2xl border p-5 ${done ? 'border-success/30 bg-success-soft' : 'border-gold/60 bg-gold-soft'}`}>
+        <h2 id="import-title" className="font-bold text-ink text-lg">
+          {done ? 'Import finished' : `Importing ${run.items.length} item${run.items.length === 1 ? '' : 's'}…`}
+        </h2>
+        <p className="text-sm text-ink mt-1" aria-live="polite">
+          {imported} imported · {linkOnly} saved as link only · {failed} not retrieved
+          {!done && ' · each result is saved as it arrives'}
+        </p>
+        {run.error && (
+          <p className="text-sm text-danger mt-2 flex gap-2"><AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" /> {run.error} Items finished before this were kept.</p>
+        )}
+      </div>
+
+      <ul className="surface rounded-xl divide-y divide-line overflow-hidden">
+        {run.items.map((i) => (
+          <li key={i.key} className="px-4 py-3 flex items-start gap-3">
+            <ImportStatusIcon status={i.status} active={!done && run.currentIndex === i.index} />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm text-ink break-words">{i.title}</p>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <SourceBadge type={i.sourceType} />
+                {i.status === 'imported' && (
+                  <span className="text-xs text-muted">
+                    {i.charCount.toLocaleString()} characters{i.pages ? ` · ${i.pages} pages` : ''}{i.truncated ? ' · truncated by the connector' : ''}
+                  </span>
+                )}
+              </div>
+              {(i.status === 'link_only' || i.status === 'failed') && i.reason && (
+                <p className="text-xs text-muted mt-1">
+                  {i.reason === 'reference_only' ? LINK_ONLY_NOTE[i.sourceType] ?? IMPORT_REASON_TEXT.reference_only : IMPORT_REASON_TEXT[i.reason] ?? IMPORT_REASON_TEXT.unknown}
+                </p>
+              )}
+            </div>
+            <SourceLink url={i.url} title={i.title} compact />
+          </li>
+        ))}
+      </ul>
+
+      {done && (
+        <div className="flex flex-wrap gap-2">
+          {onOpenWorkspace && (
+            <button type="button" onClick={() => onOpenWorkspace(run.workspaceId)} className="btn-primary px-4 py-2 rounded-lg text-sm font-semibold">
+              <FolderOpen size={14} aria-hidden="true" /> Open workspace
+            </button>
+          )}
+          {(linkOnly > 0 || failed > 0) && onUpload && (
+            <button type="button" onClick={onUpload} className="btn-secondary px-4 py-2 rounded-lg text-sm font-semibold">
+              <Upload size={14} aria-hidden="true" /> Upload or paste instead
+            </button>
+          )}
+          <button type="button" onClick={onEdit} className="btn-secondary px-4 py-2 rounded-lg text-sm font-semibold">
+            <ArrowLeft size={14} aria-hidden="true" /> Back to course content
+          </button>
+        </div>
+      )}
+    </section>
+  );
+};
+
+export const ImportStatusIcon: React.FC<{ status: WorkspaceItem['status']; active?: boolean }> = ({ status, active }) => {
+  if (status === 'pending') {
+    return active
+      ? <Loader2 size={18} className="shrink-0 mt-0.5 text-gold-ink animate-spin" aria-label="Importing" />
+      : <Clock size={18} className="shrink-0 mt-0.5 text-muted" aria-label="Waiting" />;
+  }
+  if (status === 'imported') return <CheckCircle2 size={18} className="shrink-0 mt-0.5 text-success" aria-label="Imported" />;
+  if (status === 'link_only') return <Link2 size={18} className="shrink-0 mt-0.5 text-info" aria-label="Link only" />;
+  return <XCircle size={18} className="shrink-0 mt-0.5 text-danger" aria-label="Not retrieved" />;
 };
 
 // ── Errors ──────────────────────────────────────────────────────────────────

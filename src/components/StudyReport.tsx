@@ -13,7 +13,7 @@ import {
   Activity
 } from 'lucide-react';
 import type { QuizAttempt } from '../types';
-import { USER_ID, listUserDocuments, listAllSummaries, listMistakes } from '../services/firebaseService';
+import { getUserId, listUserDocuments, listAllSummaries, listMistakes } from '../services/firebaseService';
 import { generateReport } from '../services/claudeService';
 import { useStore } from '../store/store';
 
@@ -338,8 +338,8 @@ export const StudyReport: React.FC = () => {
            <div className="bg-canvas rounded-xl p-5 mb-8 max-w-md mx-auto border border-line">
               <p className="text-[10px] font-bold uppercase text-muted tracking-widest mb-3">Diagnostic Link</p>
               <div className="flex items-center justify-between gap-4 text-xs font-mono text-muted bg-surface border border-line p-3 rounded-lg">
-                 <span className="truncate">Path: users/{USER_ID}/quizAttempts</span>
-                 <button onClick={() => { navigator.clipboard.writeText(USER_ID); alert("User ID copied"); }} className="text-cardinal font-semibold hover:underline shrink-0 cursor-pointer">Copy</button>
+                 <span className="truncate">Path: users/{getUserId()}/quizAttempts</span>
+                 <button onClick={() => { navigator.clipboard.writeText(getUserId()); alert("User ID copied"); }} className="text-cardinal font-semibold hover:underline shrink-0 cursor-pointer">Copy</button>
               </div>
            </div>
 

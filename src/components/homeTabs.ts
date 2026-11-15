@@ -8,4 +8,5 @@ export const HOME_TABS = {
   schedule: 5,
   report: 6,
   courses: 7,
+  materials: 8,
 } as const;
