@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
-import Hero from './components/Hero';
-import Features from './components/Features';
-import HowItWorks from './components/HowItWorks';
-import FinalCTA from './components/FinalCTA';
+import HomeStory from './components/home/story/HomeStory';
 import { HOME_TABS } from './components/homeTabs';
 import ReasoningChallenge from './components/ReasoningChallenge';
 import { StudySchedule } from './components/StudySchedule';
@@ -146,13 +143,7 @@ const App: React.FC = () => {
           <div className="animate-fade-in">
             <AssignmentPopup />
             {/* Signed-in users go straight back to their saved materials. */}
-            <Hero onOpenMaterials={() => navigateFromHome(HOME_TABS.materials)} onExploreFeatures={exploreFeatures} />
-            <Features onNavigate={navigateFromHome} />
-            <HowItWorks />
-            <FinalCTA
-              onCourses={() => navigateFromHome(HOME_TABS.courses)}
-              onUpload={() => navigateFromHome(HOME_TABS.upload)}
-            />
+            <HomeStory onNavigate={navigateFromHome} onExploreFeatures={exploreFeatures} />
             <footer className="py-10 px-4 border-t border-line bg-surface">
               <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-muted">
                 <div className="flex items-center gap-2">
