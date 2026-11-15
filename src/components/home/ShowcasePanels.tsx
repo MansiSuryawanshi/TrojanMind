@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, useTransform } from 'framer-motion';
 import type { MotionValue } from 'framer-motion';
 
 /**
@@ -164,5 +164,58 @@ export const HistoryPanel: React.FC = () => (
         <b>{a.v}%</b>
       </div>
     ))}
+  </div>
+);
+
+/** Clip-path wipe: a line of text revealed left to right as scroll advances. */
+const WipeMotion: React.FC<{ p: MotionValue<number>; children: React.ReactNode }> = ({ p, children }) => {
+  const clipPath = useTransform(p, [0, 1], ['inset(0 100% 0 0)', 'inset(0 0% 0 0)']);
+  return <motion.div style={{ clipPath }}>{children}</motion.div>;
+};
+const Wipe: React.FC<{ p?: MotionValue<number>; children: React.ReactNode }> = ({ p, children }) =>
+  p ? <WipeMotion p={p}>{children}</WipeMotion> : <div>{children}</div>;
+
+const MODES = ['Quick Summary', 'Detailed Summary', 'Exam Revision Summary', 'Explain Simply'];
+
+const SelectorMotion: React.FC<{ p: MotionValue<number> }> = ({ p }) => {
+  const y = useTransform(p, [0, 1], ['0em', '5.4em']);
+  return <motion.i className="tmx-sel" style={{ y }} />;
+};
+
+/** The four summary styles the Summary page really offers. The selection slides as the preview plays. */
+export const ModePanel: React.FC<{ sel?: MotionValue<number> }> = ({ sel }) => (
+  <div className="tmx-card">
+    <p className="tmx-tag">Summary style</p>
+    <div className="tmx-modes">
+      {sel ? <SelectorMotion p={sel} /> : <i className="tmx-sel" style={{ transform: 'translateY(5.4em)' }} />}
+      {MODES.map((m) => (
+        <span key={m} className="tmx-mode">{m}</span>
+      ))}
+    </div>
+  </div>
+);
+
+export const SummaryPanel: React.FC<{ l1?: MotionValue<number>; l2?: MotionValue<number>; l3?: MotionValue<number> }> = ({ l1, l2, l3 }) => (
+  <div className="tmx-card">
+    <p className="tmx-tag">Summary</p>
+    <div className="tmx-tabs">
+      <b>Overview</b>
+      <span>Concepts</span>
+      <span>Flashcards</span>
+      <span>Ask AI</span>
+    </div>
+    <Wipe p={l1}>
+      <p className="tmx-lead">Entropy measures how many ways energy can be arranged.</p>
+    </Wipe>
+    <Wipe p={l2}>
+      <p className="tmx-body">Isolated systems drift toward the arrangements that are most numerous.</p>
+    </Wipe>
+    <Wipe p={l3}>
+      <ul className="tmx-bullets">
+        <li>Entropy rises in an isolated system</li>
+        <li>No heat engine is perfectly efficient</li>
+      </ul>
+      <span className="tmx-chip tmx-chip--soft">Source pages 3 to 5</span>
+    </Wipe>
   </div>
 );

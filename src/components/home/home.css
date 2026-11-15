@@ -153,7 +153,7 @@
   font-weight: 800;
   font-size: clamp(3.1rem, 15vw, 6.5rem);
   line-height: 0.9;
-  letter-spacing: -0.035em;
+  letter-spacing: -0.012em;
   color: var(--h-on-ink);
   text-shadow: 0 2px 0 rgba(19, 0, 0, 0.35), 0 0 36px rgba(19, 0, 0, 0.55);
   transform: translate3d(calc(var(--px, 0) * -4px), calc(var(--py, 0) * -3px), 0);
@@ -325,7 +325,7 @@
   font-weight: 800;
   font-size: clamp(3.2rem, 13vw, 8rem);
   line-height: 0.9;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.015em;
 }
 .tmh-final-title em { font-style: normal; color: var(--h-gold); }
 .tmh-final-copy { max-width: 26rem; margin: 0 0 2rem; font-size: 1.1rem; line-height: 1.6; color: #f6e6e0; }

@@ -12,11 +12,12 @@ export interface Pose {
   s?: number;
   o?: number;
   ry?: number;
+  rx?: number;
 }
 export type Keys = Array<[number, Pose]>;
 
 export function usePanel(u: MotionValue<number>, keys: Keys) {
-  const base: Required<Pose> = { x: 0, y: 0, s: 1, o: 1, ry: 0 };
+  const base: Required<Pose> = { x: 0, y: 0, s: 1, o: 1, ry: 0, rx: 0 };
   const full = keys.reduce<Array<readonly [number, Required<Pose>]>>((acc, [t, pose]) => {
     const prev = acc.length ? acc[acc.length - 1][1] : base;
     return [...acc, [t, { ...prev, ...pose }] as const];
@@ -28,8 +29,9 @@ export function usePanel(u: MotionValue<number>, keys: Keys) {
   const scale = useTransform(u, at, full.map((k) => k[1].s), opts);
   const opacity = useTransform(u, at, full.map((k) => k[1].o), opts);
   const rotateY = useTransform(u, at, full.map((k) => k[1].ry), opts);
+  const rotateX = useTransform(u, at, full.map((k) => k[1].rx), opts);
   // Each panel carries its own perspective, so DOM order (not 3D depth sorting) decides what is on top.
-  return { x, y, scale, opacity, rotateY, transformPerspective: 1400 };
+  return { x, y, scale, opacity, rotateY, rotateX, transformPerspective: 1400 };
 }
 
 /** A 0 to 1 ramp between two points on the timeline. */
@@ -37,7 +39,9 @@ export function useRamp(u: MotionValue<number>, from: number, to: number) {
   return useTransform(u, [from, to], [0, 1], { clamp: true });
 }
 
-/** Scroll positions (on `u`) where each state is fully settled, and where copy swaps. */
-export const U_SPAN = 3.6;
-export const SETTLED = [0.1, 1.5, 2.6, 3.5];
-export const SWAP = [0.82, 1.8, 2.85];
+/** Timeline length, where each of the five states is fully settled, and where copy swaps. */
+export const U_SPAN = 5.2;
+export const SETTLED = [0.1, 1.95, 2.85, 3.95, 4.9];
+export const SWAP = [0.85, 2.05, 3.2, 4.2];
+/** Viewport heights of scroll per unit of timeline. */
+export const VH_PER_UNIT = 0.8;
