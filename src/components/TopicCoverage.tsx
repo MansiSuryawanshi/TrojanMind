@@ -1,13 +1,19 @@
 /**
  * TopicCoverage – animated progress bars for each study topic.
  * Color rules: >75% green (strong), 50–75% amber, <50% red.
+ * Click a topic to focus it on the readiness path / cross-exam.
  * Owner: Developer 3 (Exam Prep)
  */
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store/store';
 import type { TopicProgress } from '../types';
 
-export const TopicCoverage: React.FC = () => {
+interface Props {
+  focusTopic?: string | null;
+  onSelectTopic?: (topic: string) => void;
+}
+
+export const TopicCoverage: React.FC<Props> = ({ focusTopic = null, onSelectTopic }) => {
   const topics = useStore((s) => s.topicProgress);
   // Animate bars in on mount
   const [mounted, setMounted] = useState(false);
@@ -33,14 +39,23 @@ export const TopicCoverage: React.FC = () => {
     <div className="ep-card">
       <div className="ep-card-header">
         <h3 className="ep-card-title">Topic Coverage</h3>
-        <span className="ep-card-subtitle">{topics.length} topics tracked</span>
+        <span className="ep-card-subtitle">
+          {topics.length} topics · click a bar to focus
+        </span>
       </div>
 
       <div className="topic-list">
         {topics.map((topic: TopicProgress, idx: number) => {
           const badge = getBadge(topic.percentage);
+          const active = focusTopic === topic.name;
           return (
-            <div key={idx} className="topic-row">
+            <button
+              key={idx}
+              type="button"
+              className={`topic-row topic-row--clickable${active ? ' topic-row--focus' : ''}`}
+              onClick={() => onSelectTopic?.(topic.name)}
+              title="Focus this topic on your study path"
+            >
               <div className="topic-meta">
                 <span className="topic-name">{topic.name}</span>
                 <span className={`topic-badge ${badge.cls}`}>{badge.label}</span>
@@ -64,7 +79,7 @@ export const TopicCoverage: React.FC = () => {
                   {topic.percentage}%
                 </span>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>

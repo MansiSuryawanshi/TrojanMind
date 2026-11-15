@@ -81,6 +81,21 @@ export interface Session {
 
 export type BadgeType = 'coral' | 'purple' | 'teal';
 
+export type StudyResourceType =
+  | 'article'
+  | 'video'
+  | 'docs'
+  | 'uploaded_material'
+  | 'practice'
+  | 'other';
+
+export interface StudyResource {
+  title: string;
+  url: string;
+  type: StudyResourceType;
+  why?: string;
+}
+
 export interface SessionSlotData {
   time: string;
   label: string;
@@ -89,10 +104,19 @@ export interface SessionSlotData {
   badge_type: BadgeType;
   targets_gap: string | null;
   rationale?: string | null;
+  /** Concrete focus for this session (concepts, skills, pages). */
+  what_to_study?: string | null;
+  /** Ordered how-to steps for the session. */
+  study_steps?: string[];
+  /** Where to study from — articles, videos, uploaded notes, practice. */
+  resources?: StudyResource[];
 }
 
 export interface DaySchedule {
+  /** Display label, e.g. "Today · Monday". */
   day: string;
+  /** Calendar date YYYY-MM-DD (inclusive of exam window). */
+  date?: string;
   sessions: SessionSlotData[];
 }
 

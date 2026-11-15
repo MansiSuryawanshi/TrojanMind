@@ -608,10 +608,12 @@ export async function saveRevisionTask(
   task: Omit<RevisionTask, "id" | "createdAt">
 ): Promise<string> {
   assertFirebaseConfigured();
-  const docRef = await addDoc(collection(db, "users", USER_ID, "revisionTasks"), {
-    ...task,
-    createdAt: Timestamp.now(),
-  });
+  // Firestore rejects `undefined` field values — drop them before write
+  const cleaned: Record<string, unknown> = { createdAt: Timestamp.now() };
+  for (const [key, value] of Object.entries(task)) {
+    if (value !== undefined) cleaned[key] = value;
+  }
+  const docRef = await addDoc(collection(db, "users", USER_ID, "revisionTasks"), cleaned);
   return docRef.id;
 }
 

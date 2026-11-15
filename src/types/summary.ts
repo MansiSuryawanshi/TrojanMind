@@ -141,6 +141,14 @@ export interface RevisionTask {
   masteryEstimate?: number;
   source: 'summary' | 'exam_prep' | 'manual';
   createdAt: any;
+  /** Study this after completing the named topic (sequencing). */
+  afterTopic?: string | null;
+  /** Coach blurb explaining date/duration/order. */
+  suggestionReason?: string | null;
+  /** Concrete focus for the block. */
+  studyFocus?: string | null;
+  /** Topic that should come next after this one. */
+  nextTopic?: string | null;
 }
 
 export interface SummaryProgress {

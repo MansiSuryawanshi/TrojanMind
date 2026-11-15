@@ -23,7 +23,20 @@ function buildHeaders() {
   };
 }
 
-function extractJson(text: string): string {
+function messageText(data: { content?: { type?: string; text?: string }[] }): string {
+  const text = (data.content ?? [])
+    .map((block) => (typeof block.text === 'string' ? block.text : ''))
+    .filter((part) => part.trim().length > 0)
+    .join('\n')
+    .trim();
+  if (!text) throw new Error('Claude returned no answer text. Try again.');
+  return text;
+}
+
+function extractJson(text: string | undefined | null): string {
+  if (text == null || typeof text !== 'string') {
+    throw new Error('Claude returned empty content (no text to parse).');
+  }
   // Strip markdown fences (handles ```json, ```, multiline)
   let cleaned = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/i, '$1').trim();
   // If no fences were found, use original text
@@ -34,6 +47,15 @@ function extractJson(text: string): string {
     if (m) cleaned = m[1];
   }
   return cleaned;
+}
+
+/** Turn off up-front thinking so JSON fits in max_tokens on Sonnet 5.5. */
+function structuredExtras() {
+  const isSonnet55 = /sonnet-5-5/i.test(ANTHROPIC_MODEL);
+  return {
+    thinking: { type: isSonnet55 ? 'between_tools' : 'disabled' },
+    output_config: { effort: 'low' },
+  };
 }
 
 // ── scoreAnswers ─────────────────────────────────────────────────────────────
@@ -73,8 +95,8 @@ export async function scoreAnswers(
     throw new Error(`Claude API error ${response.status}: ${errorBody}`);
   }
 
-  const data = await response.json() as { content: { text: string }[] };
-  return JSON.parse(extractJson(data.content[0].text)) as ScoreResult;
+  const data = await response.json();
+  return JSON.parse(extractJson(messageText(data))) as ScoreResult;
 }
 
 /**
@@ -122,8 +144,8 @@ Strictness: If the answer is factually correct but uses synonyms or phrasing cha
 
     if (!response.ok) throw new Error("API call failed");
 
-    const data = await response.json() as { content: { text: string }[] };
-    const result = JSON.parse(extractJson(data.content[0].text)) as { isCorrect: boolean; feedback: string };
+    const data = await response.json();
+    const result = JSON.parse(extractJson(messageText(data))) as { isCorrect: boolean; feedback: string };
     console.log(`[Claude] Evaluation result: ${result.isCorrect ? 'CORRECT' : 'INCORRECT'}`);
     return result;
   } catch (error) {
@@ -142,21 +164,40 @@ export const generateFollowUp = async (
   pastAnswer: string,
   depthScore: number,
 ): Promise<FollowUpResult> => {
-  const res = await fetch(CLAUDE_URL, {
+  const q = (question || '').trim() || 'Explain this topic in your own words.';
+  const a = (pastAnswer || '').trim() || 'I am still building my understanding of this topic.';
+  const body = {
+    model: ANTHROPIC_MODEL,
+    max_tokens: 1024,
+    ...structuredExtras(),
+    messages: [{
+      role: 'user' as const,
+      content: `You are a Socratic examiner. A student answered:\n\nQuestion: ${q}\nAnswer: ${a}\nDepth score: ${depthScore}/10\n\nGenerate a probing follow-up targeting their weakest point. Respond ONLY with JSON:\n{"followup_question":"...","weak_point_targeted":"...","deep_answer_covers":["...","...","..."],"score_if_passed":${Math.min(depthScore + 1.5, 10)},"score_if_failed":${Math.max(depthScore - 2, 0)}}`,
+    }],
+  };
+
+  let res = await fetch(CLAUDE_URL, {
     method: 'POST',
     headers: buildHeaders(),
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 512,
-      messages: [{
-        role: 'user',
-        content: `You are a Socratic examiner. A student answered:\n\nQuestion: ${question}\nAnswer: ${pastAnswer}\nDepth score: ${depthScore}/10\n\nGenerate a probing follow-up targeting their weakest point. Respond ONLY with JSON:\n{"followup_question":"...","weak_point_targeted":"...","deep_answer_covers":["...","...","..."],"score_if_passed":${Math.min(depthScore + 1.5, 10)},"score_if_failed":${Math.max(depthScore - 2, 0)}}`,
-      }],
-    }),
+    body: JSON.stringify(body),
   });
+
+  // Retry without thinking extras if the model rejects them
+  if (!res.ok && res.status === 400) {
+    const { thinking: _t, output_config: _o, ...bare } = body as typeof body & {
+      thinking?: unknown;
+      output_config?: unknown;
+    };
+    res = await fetch(CLAUDE_URL, {
+      method: 'POST',
+      headers: buildHeaders(),
+      body: JSON.stringify(bare),
+    });
+  }
+
   if (!res.ok) throw new Error(`Claude API error ${res.status}: ${res.statusText}`);
-  const data = await res.json() as { content: { text: string }[] };
-  return JSON.parse(extractJson(data.content[0].text)) as FollowUpResult;
+  const data = await res.json();
+  return JSON.parse(extractJson(messageText(data))) as FollowUpResult;
 };
 
 // ── detectMisconception ──────────────────────────────────────────────────────
@@ -179,12 +220,124 @@ export const generateQuestion = async (_topic: string) => {
   // Implementation
 };
 
+function searchArticleUrl(topic: string): string {
+  const q = encodeURIComponent(`${topic} explained site:.edu OR tutorial OR guide`);
+  return `https://www.google.com/search?q=${q}`;
+}
+
+function scholarUrl(topic: string): string {
+  return `https://scholar.google.com/scholar?q=${encodeURIComponent(topic)}`;
+}
+
+function isoFromOffset(offset: number): string {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() + offset);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatScheduleDayLabel(iso: string, offset: number): string {
+  const d = new Date(iso + 'T12:00:00');
+  const weekday = d.toLocaleDateString(undefined, { weekday: 'long' });
+  const pretty = d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  if (offset === 0) return `Today · ${weekday} · ${pretty}`;
+  if (offset === 1) return `Tomorrow · ${weekday} · ${pretty}`;
+  return `${weekday} · ${pretty}`;
+}
+
+function looksLikeIsoDate(value?: string | null): boolean {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function normalizeScheduleSessions(
+  plan: ScheduleResponse,
+  gaps: string[],
+  uploadedMaterials: string[],
+  daysToExam = 7
+): ScheduleResponse {
+  const priority = plan.priority_gap || gaps[0] || 'General review';
+  const maxOffset = Math.max(0, Math.min(5, Math.floor(daysToExam)) );
+
+  return {
+    ...plan,
+    priority_gap: priority,
+    schedule: (plan.schedule || []).map((day, index) => {
+      const offset = Math.min(index, maxOffset);
+      const date = looksLikeIsoDate(day.date) ? day.date! : isoFromOffset(offset);
+      const dayLabel =
+        day.day && /\d{4}|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/i.test(day.day)
+          ? day.day
+          : formatScheduleDayLabel(date, offset);
+
+      return {
+        ...day,
+        date,
+        day: dayLabel,
+        sessions: (day.sessions || []).map((s) => {
+          const topic = s.targets_gap || s.topic_tag || priority;
+          const resources = Array.isArray(s.resources) ? [...s.resources] : [];
+          const hasArticle = resources.some((r) => r.type === 'article' || /http/i.test(r.url || ''));
+          if (!hasArticle) {
+            resources.push({
+              title: `Find online articles: ${topic}`,
+              url: searchArticleUrl(topic),
+              type: 'article',
+              why: 'Open reputable explainers and course notes for this topic.',
+            });
+            resources.push({
+              title: `Scholar results: ${topic}`,
+              url: scholarUrl(topic),
+              type: 'article',
+              why: 'Peer-reviewed / academic sources for deeper reading.',
+            });
+          }
+          if (
+            uploadedMaterials.length > 0 &&
+            !resources.some((r) => r.type === 'uploaded_material')
+          ) {
+            resources.push({
+              title: uploadedMaterials[0],
+              url: '',
+              type: 'uploaded_material',
+              why: 'Re-read the matching section in your uploaded notes/PDF for this topic.',
+            });
+          }
+          return {
+            ...s,
+            what_to_study:
+              s.what_to_study?.trim() ||
+              `Master the core ideas, definitions, and common pitfalls for "${topic}".`,
+            study_steps:
+              s.study_steps && s.study_steps.length
+                ? s.study_steps
+                : [
+                    `Skim your notes for "${topic}" and list 3 key claims.`,
+                    'Read one solid online article or tutorial on the same idea.',
+                    'Write a 5-sentence explanation without looking, then check accuracy.',
+                    'Do 3-5 practice questions (Challenge or flashcards) on this topic.',
+                  ],
+            resources,
+          };
+        }),
+      };
+    }),
+  };
+}
+
 // ── generateSchedule ─────────────────────────────────────────────────────────
 export const generateSchedule = async (
   gaps: string[],
   avgScore: number,
   daysToExam: number = 7,
   topicAccuracy?: { topic: string; accuracy: number }[],
+  uploadedMaterials: string[] = [],
 ): Promise<ScheduleResponse> => {
   const apiKey = getApiKey();
 
@@ -196,12 +349,23 @@ export const generateSchedule = async (
         .join('\n')}`
     : '';
 
+  const materialsContext = uploadedMaterials.length
+    ? `\nStudent uploaded materials (reference by filename when relevant):\n${uploadedMaterials
+        .slice(0, 8)
+        .map((m) => `  - ${m}`)
+        .join('\n')}`
+    : '';
+
   const prompt = `You are an adaptive learning coach for college students.
 
 The student has these concept gaps identified from real historical quiz sessions:
 Gaps (sorted weakest first): ${JSON.stringify(gaps)}
 Average understanding score: ${avgScore}/100
-Days until exam: ${daysToExam}${topicContext}
+Days until exam: ${daysToExam}${topicContext}${materialsContext}
+
+PLANNING WINDOW (HARD RULE):
+- Days until exam: ${daysToExam}. You may schedule ONLY within this window (today through exam day inclusive).
+- NEVER invent days after the exam. If daysToExam is 0 or 1, return ONLY a 1-day plan. If 2, return at most 2 days. Cap at 5 days even if more remain.
 
 ADAPTIVE STRATEGY BASED ON DAYS LEFT (${daysToExam}):
 - 0-3 days (URGENT): "Sprint Mode". Focus ONLY on the most critical weak areas. Shorter, high-intensity sessions. Rationale should mention "Critical window".
@@ -212,45 +376,80 @@ IMPORTANT RULES:
 - Topics with lower accuracy MUST get more sessions and longer durations (e.g. 60 min instead of 30 min)
 - The weakest topic should appear in every day's schedule
 - Use badge_type "coral" for gap topics, "purple" for challenge/practice, "teal" for review
-- For EACH session, provide a "rationale" field explaining why it was scheduled (e.g. "Urgency: High. Targeting core misconception in Recursion").
+- For EACH session provide:
+  - rationale: why this session is scheduled
+  - what_to_study: 1–3 sentences of CONCRETE content (concepts, definitions, procedures, formulas) — not vague advice
+  - study_steps: 3–5 ordered actionable steps for the session
+  - resources: 2–4 study sources. MUST include at least one online article (type "article") with a real https URL (prefer well-known educational sites, .edu pages, official docs, or a Google/Scholar search URL for the topic). Also include uploaded_material when filenames are provided. Types: article | video | docs | uploaded_material | practice | other.
+- Never invent fake journal DOIs. Prefer real sites (MDN, Khan Academy, official docs, university pages) OR search URLs.
 
-Generate a 3-day study schedule. Return ONLY a raw JSON object, no markdown, no backticks, no explanation:
-{"schedule":[{"day":"Today · Monday","sessions":[{"time":"9:00 am","label":"session name","topic_tag":"gap focus","duration":"45 min","badge_type":"coral","targets_gap":"gap name or null","rationale":"short evidence string"}]}],"priority_gap":"most urgent gap","readiness_message":"one sentence"}`;
+Generate a study schedule with at most ${Math.min(5, Math.max(1, daysToExam + 1))} day(s) ending on/before the exam. Each day MUST include a real calendar "date" as YYYY-MM-DD starting from today. Return ONLY a raw JSON object, no markdown, no backticks, no explanation:
+{"schedule":[{"day":"Today · Monday","date":"YYYY-MM-DD","sessions":[{"time":"9:00 am","label":"session name","topic_tag":"gap focus","duration":"45 min","badge_type":"coral","targets_gap":"gap name or null","rationale":"short evidence string","what_to_study":"concrete focus","study_steps":["step 1","step 2","step 3"],"resources":[{"title":"Article title","url":"https://...","type":"article","why":"why this helps"}]}]}],"priority_gap":"most urgent gap","readiness_message":"one sentence"}`;
 
   try {
     if (!apiKey) {
       console.warn("[ClaudeService] No API key. Falling back to local generation...");
-      return buildMockSchedule(gaps, avgScore, daysToExam, topicAccuracy);
+      return normalizeScheduleSessions(
+        buildMockSchedule(gaps, avgScore, daysToExam, topicAccuracy, uploadedMaterials),
+        gaps,
+        uploadedMaterials,
+        daysToExam
+      );
     }
 
     console.log(`[ClaudeService] Generating schedule with ${ANTHROPIC_MODEL}...`);
-    const response = await fetch(CLAUDE_URL, {
+    const body: Record<string, unknown> = {
+      model: ANTHROPIC_MODEL,
+      max_tokens: 4096,
+      ...structuredExtras(),
+      messages: [{ role: 'user', content: prompt }],
+    };
+
+    let response = await fetch(CLAUDE_URL, {
       method: 'POST',
       headers: buildHeaders(),
-      body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: prompt }],
-      }),
+      body: JSON.stringify(body),
     });
+
+    if (!response.ok && response.status === 400) {
+      const { thinking: _t, output_config: _o, ...bare } = body;
+      response = await fetch(CLAUDE_URL, {
+        method: 'POST',
+        headers: buildHeaders(),
+        body: JSON.stringify(bare),
+      });
+    }
 
     if (!response.ok) {
       console.warn(`[ClaudeService] API Error ${response.status}. Falling back to local...`);
-      return buildMockSchedule(gaps, avgScore, daysToExam, topicAccuracy);
+      return normalizeScheduleSessions(
+        buildMockSchedule(gaps, avgScore, daysToExam, topicAccuracy, uploadedMaterials),
+        gaps,
+        uploadedMaterials,
+        daysToExam
+      );
     }
 
-    const data = await response.json() as { content: { text: string }[] };
-    return { 
-      ...JSON.parse(extractJson(data.content[0].text)),
-      isFallback: false 
-    } as ScheduleResponse;
+    const data = await response.json();
+    const parsed = JSON.parse(extractJson(messageText(data))) as ScheduleResponse;
+    return normalizeScheduleSessions(
+      { ...parsed, isFallback: false },
+      gaps,
+      uploadedMaterials,
+      daysToExam
+    );
 
   } catch (err) {
     console.group("[ClaudeService-FAIL] Generation error");
     console.error(err);
     console.log("Triggering local fallback generator...");
     console.groupEnd();
-    return buildMockSchedule(gaps, avgScore, daysToExam, topicAccuracy);
+    return normalizeScheduleSessions(
+      buildMockSchedule(gaps, avgScore, daysToExam, topicAccuracy, uploadedMaterials),
+      gaps,
+      uploadedMaterials,
+      daysToExam
+    );
   }
 };
 
@@ -338,95 +537,239 @@ function buildMockSchedule(
   gaps: string[],
   _avgScore: number,
   daysToExam: number,
-  topicAccuracy?: { topic: string; accuracy: number }[]
+  topicAccuracy?: { topic: string; accuracy: number }[],
+  uploadedMaterials: string[] = []
 ): ScheduleResponse {
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const todayDate = new Date();
+  // Inclusive window: today through exam day. Cap display days at 5.
+  const windowDays = Math.min(5, Math.max(1, Math.floor(daysToExam) + 1));
   
-  const getDayName = (offset: number) => {
+  const dateForOffset = (offset: number) => {
     const d = new Date();
+    d.setHours(12, 0, 0, 0);
     d.setDate(todayDate.getDate() + offset);
-    return dayNames[d.getDay()];
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dayNum = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dayNum}`;
+  };
+
+  const labelForOffset = (offset: number) => {
+    const iso = dateForOffset(offset);
+    const d = new Date(iso + 'T12:00:00');
+    const name = dayNames[d.getDay()];
+    const pretty = d.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    if (offset === 0) return `Today · ${name} · ${pretty}`;
+    if (offset === 1) return `Tomorrow · ${name} · ${pretty}`;
+    if (offset === windowDays - 1 && daysToExam >= 0) return `Exam eve/day · ${name} · ${pretty}`;
+    return `${name} · ${pretty}`;
   };
 
   const priorityGap = gaps[0] ?? 'General review';
+  const upload = uploadedMaterials[0];
   
   // Sort topics by accuracy to prioritize weakest
   const sortedTopics = topicAccuracy 
     ? [...topicAccuracy].sort((a, b) => a.accuracy - b.accuracy)
     : gaps.map(g => ({ topic: g, accuracy: 50 }));
 
-  const plan: ScheduleResponse = {
+  const second = sortedTopics[1]?.topic ?? gaps[1] ?? priorityGap;
+
+  const detailFor = (topic: string) => ({
+    what_to_study: `Focus on definitions, procedures, and common exam traps for "${topic}". Connect the idea back to examples from class.`,
+    study_steps: [
+      `Open your notes and highlight every definition related to ${topic}.`,
+      'Read one solid online article or .edu explainer on the same topic.',
+      'Summarize the article + notes in 5 bullets from memory.',
+      'Answer 3 practice questions, then correct mistakes immediately.',
+    ],
+    resources: [
+      {
+        title: `Online articles about ${topic}`,
+        url: searchArticleUrl(topic),
+        type: 'article' as const,
+        why: 'Browse reputable tutorials and course pages for clearer explanations.',
+      },
+      {
+        title: `Google Scholar: ${topic}`,
+        url: scholarUrl(topic),
+        type: 'article' as const,
+        why: 'Academic papers and lecture notes for deeper grounding.',
+      },
+      ...(upload
+        ? [
+            {
+              title: upload,
+              url: '',
+              type: 'uploaded_material' as const,
+              why: `Locate the ${topic} section in this upload and re-read it carefully.`,
+            },
+          ]
+        : []),
+      {
+        title: 'TrojanMind Challenge / flashcards',
+        url: '',
+        type: 'practice' as const,
+        why: 'Active recall on this topic after reading.',
+      },
+    ],
+  });
+
+  type DayBlock = ScheduleResponse['schedule'][number];
+  const schedule: DayBlock[] = [];
+
+  // Day 0 — always (today)
+  schedule.push({
+    day: labelForOffset(0),
+    date: dateForOffset(0),
+    sessions: [
+      {
+        time: '9:00 am',
+        label: `Critical Gap: ${priorityGap}`,
+        topic_tag: 'Gap Focus',
+        duration: daysToExam <= 2 ? '75 min' : '60 min',
+        badge_type: 'coral',
+        targets_gap: priorityGap,
+        rationale: 'Highest priority gap identified from recent quiz performance.',
+        ...detailFor(priorityGap),
+      },
+      ...(windowDays === 1
+        ? [
+            {
+              time: '2:00 pm',
+              label: 'Exam-day rapid review',
+              topic_tag: 'Sprint',
+              duration: '40 min',
+              badge_type: 'purple' as const,
+              targets_gap: second,
+              rationale: 'Only one day left — compress secondary gaps into a short block.',
+              ...detailFor(second),
+            },
+          ]
+        : [
+            {
+              time: '2:00 pm',
+              label: 'Mixed Practice + Article Check',
+              topic_tag: 'active recall',
+              duration: '30 min',
+              badge_type: 'purple' as const,
+              targets_gap: null,
+              rationale: 'Broad reinforcement across all current topics.',
+              what_to_study: `Quick rotation across weak topics (${gaps.slice(0, 3).join(', ') || 'course core'}), confirming each with one external article.`,
+              study_steps: [
+                'Pick 2 weak topics from your last quiz.',
+                'Skim one article each, then close the tab.',
+                'Write one exam-style short answer per topic.',
+              ],
+              resources: [
+                {
+                  title: 'Mixed topic article search',
+                  url: searchArticleUrl(gaps.slice(0, 2).join(' ')),
+                  type: 'article' as const,
+                  why: 'Find short explainers for today’s weak spots.',
+                },
+              ],
+            },
+          ]),
+    ],
+  });
+
+  if (windowDays >= 2) {
+    schedule.push({
+      day: labelForOffset(1),
+      date: dateForOffset(1),
+      sessions: [
+        {
+          time: '10:00 am',
+          label: `Targeted Study: ${second}`,
+          topic_tag: 'Weak Topic',
+          duration: '45 min',
+          badge_type: 'coral',
+          targets_gap: second,
+          rationale: 'Addressing secondary concept gaps to build foundational strength.',
+          ...detailFor(second),
+        },
+        {
+          time: '4:00 pm',
+          label: windowDays === 2 ? 'Pre-exam simulation' : 'Exam Prep Simulation',
+          topic_tag: 'Mock Exam',
+          duration: '40 min',
+          badge_type: 'purple',
+          targets_gap: null,
+          rationale: 'Timed simulation to build exam-day stamina — still before the exam.',
+          what_to_study: `Timed practice covering ${priorityGap} and ${second}; review wrong answers with a source article.`,
+          study_steps: [
+            'Run a short timed quiz without notes.',
+            'For each miss, open one article or your upload section.',
+            'Rewrite the correct answer in your own words.',
+          ],
+          resources: [
+            {
+              title: `Review articles: ${priorityGap}`,
+              url: searchArticleUrl(priorityGap),
+              type: 'article',
+              why: 'Use after the mock to patch the biggest misses.',
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  if (windowDays >= 3) {
+    schedule.push({
+      day: labelForOffset(2),
+      date: dateForOffset(2),
+      sessions: [
+        {
+          time: '9:30 am',
+          label: `Mastery Review: ${priorityGap}`,
+          topic_tag: 'Spaced Repetition',
+          duration: '45 min',
+          badge_type: 'teal',
+          targets_gap: priorityGap,
+          rationale: 'Revisiting weakest area before the exam deadline.',
+          ...detailFor(priorityGap),
+        },
+      ],
+    });
+  }
+
+  // Extra mid-window days if we have 4–5 days left
+  for (let offset = 3; offset < windowDays; offset++) {
+    const topic = sortedTopics[offset % Math.max(sortedTopics.length, 1)]?.topic ?? priorityGap;
+    schedule.push({
+      day: labelForOffset(offset),
+      date: dateForOffset(offset),
+      sessions: [
+        {
+          time: '10:00 am',
+          label: `Continue: ${topic}`,
+          topic_tag: 'Within exam window',
+          duration: '45 min',
+          badge_type: offset === windowDays - 1 ? 'teal' : 'coral',
+          targets_gap: topic,
+          rationale: 'Kept inside the exam date window — no sessions after the exam.',
+          ...detailFor(topic),
+        },
+      ],
+    });
+  }
+
+  return {
     isFallback: true,
     priority_gap: priorityGap,
-    readiness_message: daysToExam < 4 
-      ? "SPRINT MODE: Focusing on your most critical gaps before the deadline."
-      : "GAP CLOSURE: Methodical review of identifies weaknesses.",
-    schedule: [
-      {
-        day: `Today · ${getDayName(0)}`,
-        sessions: [
-          { 
-            time: '9:00 am', 
-            label: `Critical Gap: ${priorityGap}`, 
-            topic_tag: 'Gap Focus', 
-            duration: '60 min', 
-            badge_type: 'coral', 
-            targets_gap: priorityGap,
-            rationale: "Highest priority gap identified from recent quiz performance."
-          },
-          { 
-            time: '2:00 pm', 
-            label: 'Mixed Practice Arena', 
-            topic_tag: 'active recall', 
-            duration: '30 min', 
-            badge_type: 'purple', 
-            targets_gap: null,
-            rationale: "Broad reinforcement across all current topics."
-          }
-        ]
-      },
-      {
-        day: getDayName(1),
-        sessions: [
-          { 
-            time: '10:00 am', 
-            label: sortedTopics[1] ? `Targeted Study: ${sortedTopics[1].topic}` : 'Concept Review', 
-            topic_tag: 'Weak Topic', 
-            duration: '45 min', 
-            badge_type: 'coral', 
-            targets_gap: sortedTopics[1]?.topic ?? null,
-            rationale: "Addressing secondary concept gaps to build foundational strength."
-          },
-          { 
-            time: '4:00 pm', 
-            label: 'Exam Prep Simulation', 
-            topic_tag: 'Mock Exam', 
-            duration: '40 min', 
-            badge_type: 'purple', 
-            targets_gap: null,
-            rationale: "Timed simulation to build exam-day stamina."
-          }
-        ]
-      },
-      {
-        day: getDayName(2),
-        sessions: [
-          { 
-            time: '9:30 am', 
-            label: `Mastery Review: ${priorityGap}`, 
-            topic_tag: 'Spaced Repetition', 
-            duration: '45 min', 
-            badge_type: 'teal', 
-            targets_gap: priorityGap,
-            rationale: "Revisiting weakest area to consolidate long-term memory."
-          }
-        ]
-      }
-    ]
+    readiness_message:
+      daysToExam < 4
+        ? `SPRINT MODE: Plan covers the next ${windowDays} day(s) only — ending on/before exam.`
+        : `GAP CLOSURE: ${windowDays}-day plan ending on/before your exam (no post-exam sessions).`,
+    schedule,
   };
-
-  return plan;
 }
 
 function buildMockReport(snapshot: StudySnapshot): GeneratedReport {
@@ -459,19 +802,36 @@ export const evaluateDefense = async (
   defenseAnswer: string,
   deepAnswerCovers: string[],
 ): Promise<DefenseEvaluation> => {
-  const res = await fetch(CLAUDE_URL, {
+  const covers = Array.isArray(deepAnswerCovers) ? deepAnswerCovers : [];
+  const body = {
+    model: ANTHROPIC_MODEL,
+    max_tokens: 1024,
+    ...structuredExtras(),
+    messages: [{
+      role: 'user' as const,
+      content: `Evaluate this student's defense.\n\nOriginal question: ${question}\nFollow-up: ${followUpQuestion}\nDefense: ${defenseAnswer}\nExpected coverage: ${covers.join(', ')}\n\nRespond ONLY with JSON:\n{"passed":true,"strength":"strong","what_they_got_right":"...or null","what_they_missed":"...or null","verdict_label":"Gap closed"}`,
+    }],
+  };
+
+  let res = await fetch(CLAUDE_URL, {
     method: 'POST',
     headers: buildHeaders(),
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 512,
-      messages: [{
-        role: 'user',
-        content: `Evaluate this student's defense.\n\nOriginal question: ${question}\nFollow-up: ${followUpQuestion}\nDefense: ${defenseAnswer}\nExpected coverage: ${deepAnswerCovers.join(', ')}\n\nRespond ONLY with JSON:\n{"passed":true,"strength":"strong","what_they_got_right":"...or null","what_they_missed":"...or null","verdict_label":"Gap closed"}`,
-      }],
-    }),
+    body: JSON.stringify(body),
   });
+
+  if (!res.ok && res.status === 400) {
+    const { thinking: _t, output_config: _o, ...bare } = body as typeof body & {
+      thinking?: unknown;
+      output_config?: unknown;
+    };
+    res = await fetch(CLAUDE_URL, {
+      method: 'POST',
+      headers: buildHeaders(),
+      body: JSON.stringify(bare),
+    });
+  }
+
   if (!res.ok) throw new Error(`Claude API error ${res.status}: ${res.statusText}`);
-  const data = await res.json() as { content: { text: string }[] };
-  return JSON.parse(extractJson(data.content[0].text)) as DefenseEvaluation;
+  const data = await res.json();
+  return JSON.parse(extractJson(messageText(data))) as DefenseEvaluation;
 };

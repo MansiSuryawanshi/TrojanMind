@@ -1,14 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ReadinessScore } from './ReadinessScore';
-import { TopicCoverage } from './TopicCoverage';
 import { WeakAreas } from './WeakAreas';
 import { CrossExamination } from './CrossExamination';
-import { MaterialPractice } from './MaterialPractice';
+import { ReadinessPathCoach } from './ReadinessPathCoach';
 import { useStore } from '../store/store';
 import { saveExamDate } from '../services/firebaseService';
 import { deriveStudentAnalytics, mapStatsToProgress } from '../services/analyticsService';
 
-export const ExamPrep: React.FC = () => {
+interface ExamPrepProps {
+  onGoToSchedule?: () => void;
+  onGoToChallenge?: () => void;
+}
+
+export const ExamPrep: React.FC<ExamPrepProps> = ({
+  onGoToSchedule,
+  onGoToChallenge,
+}) => {
   const readinessScore   = useStore((s) => s.readinessScore);
   const setTopicProgress = useStore((s) => s.setTopicProgress);
   const setWeakAreas     = useStore((s) => s.setWeakAreas);
@@ -21,10 +28,13 @@ export const ExamPrep: React.FC = () => {
   const setDaysLeft = useStore((s) => s.setDaysLeft);
   const allAttempts = useStore((s) => s.allAttempts);
   const isInitialLoadComplete = useStore((s) => s.isInitialLoadComplete);
-  const summaryBridge = useStore((s) => s.summaryBridge);
+  const topicProgress = useStore((s) => s.topicProgress);
 
   const [isLoading, setIsLoading] = useState(!isInitialLoadComplete);
   const [isEditingDate, setIsEditingDate] = useState(false);
+  const [focusTopic, setFocusTopic] = useState<string | null>(null);
+  const [launchTopic, setLaunchTopic] = useState<string | null>(null);
+  const crossExamRef = useRef<HTMLDivElement>(null);
 
   // Derived check for empty state
   const hasData = allAttempts.length > 0;
@@ -56,6 +66,13 @@ export const ExamPrep: React.FC = () => {
     console.groupEnd();
   }, [allAttempts, examDate, daysLeft, setTopicProgress, setWeakAreas, setReadinessScore, isInitialLoadComplete]);
 
+  // Seed focus to weakest topic once data lands
+  useEffect(() => {
+    if (focusTopic || !topicProgress.length) return;
+    const weakest = [...topicProgress].sort((a, b) => a.percentage - b.percentage)[0];
+    if (weakest) setFocusTopic(weakest.name);
+  }, [topicProgress, focusTopic]);
+
   const handleDateChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const newDate = e.target.value;
     if (!newDate) return;
@@ -82,6 +99,14 @@ export const ExamPrep: React.FC = () => {
 
   const pill = getReadinessPill(readinessScore);
 
+  const startCrossExam = (topic: string) => {
+    setFocusTopic(topic);
+    setLaunchTopic(topic);
+    requestAnimationFrame(() => {
+      crossExamRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
   // ── Loading state ──
   if (isLoading) {
     return (
@@ -101,9 +126,9 @@ export const ExamPrep: React.FC = () => {
         <div className="ep-header-left">
           <h1 className="ep-title">Exam Readiness</h1>
           <p className="ep-subtitle">
-            {daysLeft !== null && daysLeft <= 7 
-              ? "Critical window: run the Exam Prep Arena on your weak topics." 
-              : "Track readiness, then enter the quiz arena to practice from your uploads"}
+            {daysLeft !== null && daysLeft <= 7
+              ? 'Critical window: follow the red → amber → green path your coach builds below.'
+              : 'Follow the color path — focus red gaps, then amber, then maintain green'}
           </p>
         </div>
         <div className="ep-header-right">
@@ -152,8 +177,13 @@ export const ExamPrep: React.FC = () => {
           <div className="ep-empty-icon">📋</div>
           <h3 className="ep-empty-title">No evidence found</h3>
           <p className="ep-empty-body">
-            Enter the Exam Prep Arena below (or take a Reasoning Challenge) to ground your readiness score in real practice.
+            Take a Reasoning Challenge first so readiness can be grounded in real practice attempts.
           </p>
+          {onGoToChallenge && (
+            <button type="button" className="btn-primary mt-4 px-6 py-2.5 rounded-xl font-semibold" onClick={onGoToChallenge}>
+              Start a Challenge →
+            </button>
+          )}
         </div>
       )}
 
@@ -163,23 +193,33 @@ export const ExamPrep: React.FC = () => {
           {/* Left: score ring + weak areas */}
           <div className="ep-col-left">
             <ReadinessScore score={readinessScore} />
-            <WeakAreas />
+            <WeakAreas
+              onSelectTopic={(topic) => {
+                setFocusTopic(topic);
+                startCrossExam(topic);
+              }}
+            />
           </div>
 
-          {/* Right: topic bars + cross-examination */}
+          {/* Right: path coach + topic bars + cross-examination */}
           <div className="ep-col-right">
-            <TopicCoverage />
-            <CrossExamination />
+            <ReadinessPathCoach
+              focusTopic={focusTopic}
+              onFocusTopic={setFocusTopic}
+              onStartCrossExam={startCrossExam}
+              onGoToSchedule={() => onGoToSchedule?.()}
+              onGoToChallenge={() => onGoToChallenge?.()}
+            />
+            <div ref={crossExamRef}>
+              <CrossExamination
+                launchTopic={launchTopic}
+                onLaunchConsumed={() => setLaunchTopic(null)}
+                highlightTopic={focusTopic}
+              />
+            </div>
           </div>
         </div>
       )}
-
-      <div className="px-4 md:px-8 pb-12 max-w-6xl mx-auto">
-        <MaterialPractice
-          initialDocumentId={summaryBridge.documentId}
-          autoOpen={summaryBridge.openMaterialPractice}
-        />
-      </div>
     </div>
   );
 };

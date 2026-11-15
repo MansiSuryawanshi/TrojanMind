@@ -165,7 +165,10 @@ const App: React.FC = () => {
         )}
         {activeTab === HOME_TABS.examPrep && (
           <div className="animate-fade-in">
-            <ExamPrep />
+            <ExamPrep
+              onGoToSchedule={() => setActiveTab(HOME_TABS.schedule)}
+              onGoToChallenge={() => setActiveTab(HOME_TABS.challenge)}
+            />
           </div>
         )}
         {activeTab === HOME_TABS.schedule && (

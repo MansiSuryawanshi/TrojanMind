@@ -22,6 +22,16 @@ const QuizQuestion: React.FC<QuizQuestionProps> = ({ question, onAnswer, disable
     onAnswer(option, option === question.correctAnswer);
   };
 
+  const options = (question.options || []).filter((o) => String(o).trim().length > 0);
+
+  if (options.length < 2) {
+    return (
+      <div className="w-full animate-slide-up p-4 rounded-xl border border-danger/25 bg-danger-soft text-danger text-sm">
+        This question is missing multiple-choice options. Skip or regenerate the challenge.
+      </div>
+    );
+  }
+
   return (
     <div className="w-full animate-slide-up">
       {/* Question Header */}
@@ -41,9 +51,9 @@ const QuizQuestion: React.FC<QuizQuestionProps> = ({ question, onAnswer, disable
         </h3>
       </div>
 
-      {/* MCQ Options */}
+      {/* MCQ Options only — Challenge never uses short answer */}
       <div className="grid grid-cols-1 gap-3">
-        {question.options!.map((option, idx) => (
+        {options.map((option, idx) => (
           <button
             key={idx}
             type="button"

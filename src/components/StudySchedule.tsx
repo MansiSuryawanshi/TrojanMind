@@ -8,6 +8,7 @@ import { generateSchedule } from '../services/claudeService';
 import { listRevisionTasks } from '../services/firebaseService';
 import { MetricsRow } from './MetricsRow';
 import { DayScheduleCard } from './DayScheduleCard';
+import { planningDayCount } from '../services/scheduleSuggest';
 
 interface StudyScheduleProps {
   onSwitchToChallenge: () => void;
@@ -93,6 +94,12 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
     }
   }, [allAttempts, examDate, isInitialLoadComplete, cachedSchedule, loading]);
 
+  const uploadedMaterials = [
+    ...new Set(
+      allAttempts.flatMap((a) => a.selectedFileNames || []).filter(Boolean)
+    ),
+  ].slice(0, 8);
+
   const fetchScheduleWith = async (
     gaps: string[],
     score: number,
@@ -108,7 +115,7 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
     
     try {
       console.log(`Step 2: Calling Claude API (or local fallback)...`);
-      const result = await generateSchedule(gaps, score, days, accuracy);
+      const result = await generateSchedule(gaps, score, days, accuracy, uploadedMaterials);
       
       if (result.isFallback) {
         console.warn(`Step 3: AI Generation failed/unavailable. Using grounded fallback.`);
@@ -129,7 +136,12 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
     }
   };
 
-  const fetchSchedule = () => fetchScheduleWith(conceptGaps, avgScore, topicAccuracy, daysLeft ?? 7);
+  const fetchSchedule = () => {
+    // daysToExam for the API: exclusive "days left" — window is inclusive of exam day
+    const window = planningDayCount(daysLeft, examDate);
+    const daysToExam = Math.max(0, window - 1);
+    return fetchScheduleWith(conceptGaps, avgScore, topicAccuracy, daysToExam);
+  };
 
   const totalSessions =
     localSchedule?.schedule.reduce((sum, day) => sum + day.sessions.length, 0) ?? 0;
@@ -165,9 +177,19 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
       <div className="mb-8 animate-slide-up">
         <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink mb-2">Adaptive Plan</h1>
         <div className="flex flex-wrap items-center gap-3">
-          <p className="text-muted">Based on your concept gaps</p>
+          <p className="text-muted">What to study, how, and where — only through your exam date</p>
           {totalSessions > 0 && <span className="px-3 py-1 rounded-full bg-success-soft border border-success/25 text-success text-xs font-semibold">{totalSessions} sessions planned</span>}
         </div>
+        {examDate ? (
+          <p className="text-xs text-muted mt-2">
+            Planning window: today → <span className="font-semibold text-ink">{examDate}</span>
+            {daysLeft != null ? ` (${Math.max(0, daysLeft)} day${daysLeft === 1 ? '' : 's'} left)` : ''}. Nothing after the exam.
+          </p>
+        ) : (
+          <p className="text-xs text-warning mt-2">
+            Set an exam date on Exam Prep so the plan stops on exam day.
+          </p>
+        )}
       </div>
 
       {localSchedule?.readiness_message && (
@@ -202,13 +224,40 @@ export const StudySchedule: React.FC<StudyScheduleProps> = ({ onSwitchToChalleng
                 key={t.id || `${t.topic}-${t.date}`}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-4 py-3 text-sm bg-sunken"
               >
-                <div>
+                <div className="min-w-0">
                   <div className="font-bold text-ink">{t.topic}</div>
                   <div className="text-xs text-muted">
-                    {t.date} · {t.durationMinutes} min
+                    {(() => {
+                      const d = t.date ? new Date(t.date + 'T12:00:00') : null;
+                      const pretty =
+                        d && !Number.isNaN(d.getTime())
+                          ? d.toLocaleDateString(undefined, {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })
+                          : t.date;
+                      return pretty;
+                    })()}{' '}
+                    · {t.durationMinutes} min
                     {t.fileName ? ` · ${t.fileName}` : ''}
                     {t.source ? ` · via ${t.source}` : ''}
                   </div>
+                  {(t.afterTopic || t.nextTopic) && (
+                    <div className="text-xs text-ink mt-1">
+                      Path:{' '}
+                      {t.afterTopic ? <span className="text-muted">{t.afterTopic} → </span> : null}
+                      <span className="font-semibold text-cardinal">{t.topic}</span>
+                      {t.nextTopic ? <span className="text-muted"> → {t.nextTopic}</span> : null}
+                    </div>
+                  )}
+                  {t.studyFocus && (
+                    <p className="text-xs text-muted mt-1 leading-snug">{t.studyFocus}</p>
+                  )}
+                  {t.suggestionReason && (
+                    <p className="text-[11px] text-muted italic mt-1 leading-snug">{t.suggestionReason}</p>
+                  )}
                 </div>
               </div>
             ))}

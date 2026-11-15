@@ -53,6 +53,10 @@ import {
   openPrintableSummary,
 } from '../services/summaryService';
 import { useStore } from '../store/store';
+import {
+  suggestSchedulePlacement,
+  type ScheduleSuggestion,
+} from '../services/scheduleSuggest';
 
 type InnerTab =
   | 'overview'
@@ -84,6 +88,10 @@ export const Summary: React.FC<SummaryProps> = ({
 }) => {
   const setSummaryBridge = useStore((s) => s.setSummaryBridge);
   const addRevisionTaskLocal = useStore((s) => s.addRevisionTaskLocal);
+  const topicProgress = useStore((s) => s.topicProgress);
+  const revisionTasks = useStore((s) => s.revisionTasks);
+  const daysLeft = useStore((s) => s.daysLeft);
+  const examDate = useStore((s) => s.examDate);
 
   const [documents, setDocuments] = useState<StudyDocument[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(true);
@@ -122,6 +130,11 @@ export const Summary: React.FC<SummaryProps> = ({
   const [scheduleTopic, setScheduleTopic] = useState<string | null>(null);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleMins, setScheduleMins] = useState(45);
+  const [scheduleAfter, setScheduleAfter] = useState<string | null>(null);
+  const [scheduleNext, setScheduleNext] = useState<string | null>(null);
+  const [scheduleFocus, setScheduleFocus] = useState('');
+  const [scheduleReason, setScheduleReason] = useState('');
+  const [scheduleSuggestion, setScheduleSuggestion] = useState<ScheduleSuggestion | null>(null);
 
   const selected = useMemo(
     () => documents.find((d) => d.id === selectedId) || null,
@@ -407,6 +420,40 @@ export const Summary: React.FC<SummaryProps> = ({
     setFlipped(false);
   };
 
+  const openScheduleModal = (topic: string) => {
+    const suggestion = suggestSchedulePlacement({
+      topic,
+      summary: activeSummary,
+      topicProgress,
+      revisionTasks,
+      daysLeft,
+      examDate,
+    });
+    setScheduleTopic(topic);
+    setScheduleSuggestion(suggestion);
+    setScheduleDate(suggestion.date);
+    setScheduleMins(suggestion.durationMinutes);
+    setScheduleAfter(suggestion.afterTopic);
+    setScheduleNext(suggestion.nextTopic);
+    setScheduleFocus(suggestion.studyFocus);
+    setScheduleReason(suggestion.reason);
+  };
+
+  const applySuggestionDefaults = () => {
+    if (!scheduleSuggestion) return;
+    setScheduleDate(scheduleSuggestion.date);
+    setScheduleMins(scheduleSuggestion.durationMinutes);
+    setScheduleAfter(scheduleSuggestion.afterTopic);
+    setScheduleNext(scheduleSuggestion.nextTopic);
+    setScheduleFocus(scheduleSuggestion.studyFocus);
+    setScheduleReason(scheduleSuggestion.reason);
+  };
+
+  const closeScheduleModal = () => {
+    setScheduleTopic(null);
+    setScheduleSuggestion(null);
+  };
+
   const addTopicToSchedule = async () => {
     if (!scheduleTopic || !scheduleDate || !selected) return;
     const task = {
@@ -416,11 +463,15 @@ export const Summary: React.FC<SummaryProps> = ({
       date: scheduleDate,
       durationMinutes: scheduleMins,
       source: 'summary' as const,
+      afterTopic: scheduleAfter,
+      nextTopic: scheduleNext,
+      studyFocus: scheduleFocus || null,
+      suggestionReason: scheduleReason || null,
     };
     const id = await saveRevisionTask(task);
     addRevisionTaskLocal({ ...task, id, createdAt: null });
-    setScheduleTopic(null);
-    setSaveMsg('Added to Study Schedule');
+    closeScheduleModal();
+    setSaveMsg('Added to Study Schedule with coach plan');
     setTimeout(() => setSaveMsg(null), 2000);
     onGoToSchedule();
   };
@@ -430,7 +481,7 @@ export const Summary: React.FC<SummaryProps> = ({
     setSummaryBridge({
       documentId: selected.id || null,
       fileName: selected.fileName,
-      openMaterialPractice: true,
+      openMaterialPractice: false,
     });
     onGoToExamPrep();
   };
@@ -733,7 +784,7 @@ export const Summary: React.FC<SummaryProps> = ({
                       <p className="text-xs text-cardinal mt-3">Source: Page {t.sourcePages.join(', ')}</p>
                     )}
                     <button
-                      onClick={() => setScheduleTopic(t.title)}
+                      onClick={() => openScheduleModal(t.title)}
                       className="mt-3 text-xs font-bold text-info hover:text-info inline-flex items-center gap-1"
                     >
                       <CalendarPlus className="w-3.5 h-3.5" /> Add Topic to Study Schedule
@@ -843,11 +894,11 @@ export const Summary: React.FC<SummaryProps> = ({
                               className="px-3 py-1.5 rounded-full bg-sunken text-xs font-bold"
                               onClick={goPractice}
                             >
-                              Generate Practice
+                              Exam Prep
                             </button>
                             <button
                               className="px-3 py-1.5 rounded-full bg-sunken text-xs font-bold"
-                              onClick={() => setScheduleTopic(c.name)}
+                              onClick={() => openScheduleModal(c.name)}
                             >
                               Add to Study Plan
                             </button>
@@ -1119,7 +1170,7 @@ export const Summary: React.FC<SummaryProps> = ({
                   {activeSummary.topicsToReview.map((t) => (
                     <button
                       key={t}
-                      onClick={() => setScheduleTopic(t)}
+                      onClick={() => openScheduleModal(t)}
                       className="px-3 py-1.5 rounded-full bg-sunken border border-line text-sm hover:border-cardinal/40"
                     >
                       {t}
@@ -1173,10 +1224,16 @@ export const Summary: React.FC<SummaryProps> = ({
               <Copy className="w-4 h-4" /> Copy
             </button>
             <button onClick={goPractice} className="btn-secondary px-5 py-3 rounded-full font-bold text-sm inline-flex items-center gap-2">
-              <Brain className="w-4 h-4" /> Generate Practice Exam
+              <Brain className="w-4 h-4" /> Open Exam Prep
             </button>
             <button
-              onClick={() => setScheduleTopic(activeSummary.topics[0]?.title || activeSummary.keyConcepts[0] || 'Review material')}
+              onClick={() =>
+                openScheduleModal(
+                  activeSummary.topics[0]?.title ||
+                    activeSummary.keyConcepts[0] ||
+                    'Review material'
+                )
+              }
               className="btn-secondary px-5 py-3 rounded-full font-bold text-sm inline-flex items-center gap-2"
             >
               <CalendarPlus className="w-4 h-4" /> Add Topic to Schedule
@@ -1185,38 +1242,215 @@ export const Summary: React.FC<SummaryProps> = ({
         </>
       )}
 
-      {/* Schedule modal */}
+      {/* Schedule modal — interactive coach */}
       {scheduleTopic && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-surfacelack/70 p-4">
-          <div className="surface-raised rounded-2xl border border-line p-6 w-full max-w-md">
-            <h3 className="text-xl font-extrabold mb-1">Add to Study Schedule</h3>
-            <p className="text-sm text-muted mb-4">Topic: {scheduleTopic}</p>
-            <label className="text-xs font-bold uppercase text-muted">Date</label>
-            <input
-              type="date"
-              value={scheduleDate}
-              onChange={(e) => setScheduleDate(e.target.value)}
-              className="w-full mt-1 mb-3 bg-sunken border border-line rounded-xl px-3 py-2"
-            />
-            <label className="text-xs font-bold uppercase text-muted">Duration (minutes)</label>
-            <input
-              type="number"
-              min={15}
-              max={180}
-              value={scheduleMins}
-              onChange={(e) => setScheduleMins(Number(e.target.value) || 45)}
-              className="w-full mt-1 mb-5 bg-sunken border border-line rounded-xl px-3 py-2"
-            />
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4">
+          <div
+            className="surface-raised rounded-2xl border border-line p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto"
+            role="dialog"
+            aria-labelledby="schedule-modal-title"
+          >
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <h3 id="schedule-modal-title" className="text-xl font-extrabold mb-1">
+                  Add to Study Schedule
+                </h3>
+                <p className="text-sm text-muted">
+                  Topic: <span className="text-ink font-semibold">{scheduleTopic}</span>
+                </p>
+              </div>
+              {scheduleSuggestion && (
+                <span
+                  className={`shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border ${
+                    scheduleSuggestion.band === 'weak'
+                      ? 'bg-danger-soft text-danger border-danger/25'
+                      : scheduleSuggestion.band === 'moderate'
+                        ? 'bg-warning-soft text-warning border-warning/25'
+                        : scheduleSuggestion.band === 'strong'
+                          ? 'bg-success-soft text-success border-success/25'
+                          : 'bg-sunken text-muted border-line'
+                  }`}
+                >
+                  {scheduleSuggestion.priority} priority
+                </span>
+              )}
+            </div>
+
+            {scheduleReason && (
+              <div className="mb-4 rounded-xl border border-line border-l-4 border-l-cardinal bg-sunken/80 px-3.5 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-cardinal mb-1 inline-flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" /> Coach suggestion
+                </p>
+                <p className="text-sm text-ink leading-relaxed">{scheduleReason}</p>
+                <button
+                  type="button"
+                  onClick={applySuggestionDefaults}
+                  className="mt-2 text-xs font-bold text-cardinal hover:underline"
+                >
+                  Reset to suggested date &amp; time
+                </button>
+              </div>
+            )}
+
+            {scheduleFocus && (
+              <div className="mb-4">
+                <label className="text-xs font-bold uppercase text-muted">What to study in this block</label>
+                <textarea
+                  value={scheduleFocus}
+                  onChange={(e) => setScheduleFocus(e.target.value)}
+                  rows={2}
+                  className="w-full mt-1 bg-sunken border border-line rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+            )}
+
+            <div className="mb-4">
+              <label className="text-xs font-bold uppercase text-muted">Do this after</label>
+              <p className="text-[11px] text-muted mb-1.5">
+                Sequence: finish the earlier topic first, then this one
+              </p>
+              <div className="flex flex-wrap gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setScheduleAfter(null)}
+                  className={`text-xs font-semibold px-2.5 py-1.5 rounded-full border ${
+                    !scheduleAfter
+                      ? 'border-cardinal bg-cardinal-soft text-cardinal'
+                      : 'border-line bg-surface text-muted'
+                  }`}
+                >
+                  Start with this
+                </button>
+                {scheduleSuggestion?.afterTopic && (
+                  <button
+                    type="button"
+                    onClick={() => setScheduleAfter(scheduleSuggestion.afterTopic)}
+                    className={`text-xs font-semibold px-2.5 py-1.5 rounded-full border max-w-full truncate ${
+                      scheduleAfter === scheduleSuggestion.afterTopic
+                        ? 'border-cardinal bg-cardinal-soft text-cardinal'
+                        : 'border-line bg-surface text-muted'
+                    }`}
+                  >
+                    After: {scheduleSuggestion.afterTopic}
+                  </button>
+                )}
+                {(activeSummary?.topics || [])
+                  .map((t) => t.title)
+                  .filter((t) => t && t !== scheduleTopic && t !== scheduleSuggestion?.afterTopic)
+                  .slice(0, 4)
+                  .map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setScheduleAfter(t)}
+                      className={`text-xs font-semibold px-2.5 py-1.5 rounded-full border max-w-[11rem] truncate ${
+                        scheduleAfter === t
+                          ? 'border-cardinal bg-cardinal-soft text-cardinal'
+                          : 'border-line bg-surface text-muted'
+                      }`}
+                      title={t}
+                    >
+                      After: {t}
+                    </button>
+                  ))}
+              </div>
+              {scheduleAfter && (
+                <p className="text-xs text-ink">
+                  Plan: <strong>{scheduleAfter}</strong> → <strong>{scheduleTopic}</strong>
+                  {scheduleNext ? (
+                    <>
+                      {' '}
+                      → <strong>{scheduleNext}</strong>
+                    </>
+                  ) : null}
+                </p>
+              )}
+            </div>
+
+            <div className="mb-4">
+              <label className="text-xs font-bold uppercase text-muted">Suggested day</label>
+              <div className="flex flex-wrap gap-2 mt-1.5 mb-2">
+                {(scheduleSuggestion?.altDates || []).map((a) => (
+                  <button
+                    key={a.date}
+                    type="button"
+                    onClick={() => setScheduleDate(a.date)}
+                    className={`text-xs font-semibold px-2.5 py-1.5 rounded-full border ${
+                      scheduleDate === a.date
+                        ? 'border-cardinal bg-cardinal-soft text-cardinal'
+                        : 'border-line bg-surface text-muted'
+                    }`}
+                  >
+                    {a.label}
+                    {a.date === scheduleSuggestion?.date ? ' · best' : ''}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="date"
+                value={scheduleDate}
+                min={new Date().toISOString().slice(0, 10)}
+                max={scheduleSuggestion?.latestDate || examDate || undefined}
+                onChange={(e) => {
+                  let next = e.target.value;
+                  const latest = scheduleSuggestion?.latestDate || examDate;
+                  if (latest && next > latest) next = latest;
+                  setScheduleDate(next);
+                }}
+                className="w-full bg-sunken border border-line rounded-xl px-3 py-2 text-sm"
+              />
+              {(scheduleSuggestion?.latestDate || examDate) && (
+                <p className="text-[11px] text-muted mt-1.5">
+                  Can only schedule through exam day (
+                  {scheduleSuggestion?.latestDate || examDate}).
+                </p>
+              )}
+            </div>
+
+            <div className="mb-5">
+              <label className="text-xs font-bold uppercase text-muted">Duration</label>
+              <div className="flex flex-wrap gap-2 mt-1.5 mb-2">
+                {(scheduleSuggestion?.altDurations || [25, 45, 60, 90]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setScheduleMins(m)}
+                    className={`text-xs font-semibold px-2.5 py-1.5 rounded-full border ${
+                      scheduleMins === m
+                        ? 'border-cardinal bg-cardinal-soft text-cardinal'
+                        : 'border-line bg-surface text-muted'
+                    }`}
+                  >
+                    {m} min
+                    {m === scheduleSuggestion?.durationMinutes ? ' · suggested' : ''}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="number"
+                min={15}
+                max={180}
+                value={scheduleMins}
+                onChange={(e) => setScheduleMins(Number(e.target.value) || 45)}
+                className="w-full bg-sunken border border-line rounded-xl px-3 py-2 text-sm"
+              />
+            </div>
+
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setScheduleTopic(null)} className="btn-secondary px-4 py-2 rounded-full text-sm font-bold">
+              <button
+                type="button"
+                onClick={closeScheduleModal}
+                className="btn-secondary px-4 py-2 rounded-full text-sm font-bold"
+              >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={() => void addTopicToSchedule()}
                 disabled={!scheduleDate}
                 className="btn-primary px-4 py-2 rounded-full text-sm font-bold disabled:opacity-50"
               >
-                Save task
+                Save planned block
               </button>
             </div>
           </div>

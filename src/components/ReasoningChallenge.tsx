@@ -255,9 +255,21 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
       console.log(`Input Analysis: { originalLength: ${originalLength}, cleanedLength: ${cleanedLength}, topics: ${detectedTopics.length} }`);
       console.groupEnd();
 
-      console.log(`[Challenge-Pipeline] Requesting ${session.questionCount} questions from Service...`);
-      const questions = await generateQuizFromContent(cleanedText, session.questionCount);
-      console.log(`[Challenge-Pipeline] Generation SUCCESS. Questions received: ${questions.length}`);
+      console.log(`[Challenge-Pipeline] Requesting ${session.questionCount} MCQ-only questions from Service...`);
+      const rawQuestions = await generateQuizFromContent(cleanedText, session.questionCount);
+      // Challenge is MCQ-only — drop anything without 4 options
+      const questions = rawQuestions
+        .map((q, i) => ({
+          ...q,
+          id: q.id || `q${i + 1}`,
+          type: 'mcq' as const,
+          options: (q.options || []).map((o) => String(o).trim()).filter(Boolean).slice(0, 4),
+        }))
+        .filter((q) => q.options.length === 4 && q.options.includes(q.correctAnswer));
+      if (!questions.length) {
+        throw new Error('No valid multiple-choice questions generated. Try again.');
+      }
+      console.log(`[Challenge-Pipeline] Generation SUCCESS. MCQs kept: ${questions.length}`);
       
       let claudeCompetitor = session.claudeCompetitor || Object.keys(session.participants).length === 1;
       
@@ -312,7 +324,14 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
       const combinedContent = selectedDocs.map(d => d.rawText).join('\n\n---\n\n');
       
       console.log(`[Challenge] Requesting rule-based fallback from QuizService...`);
-      const questions = await generateFallbackQuiz(combinedContent, session.questionCount);
+      const questions = (await generateFallbackQuiz(combinedContent, session.questionCount))
+        .map((q, i) => ({
+          ...q,
+          id: q.id || `fb${i + 1}`,
+          type: 'mcq' as const,
+          options: (q.options || []).map((o) => String(o).trim()).filter(Boolean).slice(0, 4),
+        }))
+        .filter((q) => q.options.length >= 2);
       
       await updateSession(session.id, {
         questions,
@@ -602,7 +621,7 @@ const ReasoningChallenge: React.FC<{ onAddMaterial?: () => void }> = ({ onAddMat
     return (
       <div className="max-w-2xl mx-auto py-6 md:py-10 animate-fade-in text-center">
         <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink mb-2">Question Count</h2>
-        <p className="text-muted mb-10">Choose the length of your reasoning challenge.</p>
+        <p className="text-muted mb-10">Multiple-choice only — pick how many MCQs to run.</p>
         <div className="grid grid-cols-2 gap-3 md:gap-4 mb-10">
           {[5, 10, 20, 50].map((count) => (
             <button 

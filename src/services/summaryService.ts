@@ -208,6 +208,23 @@ function conceptsFromSummaryFallback(summary: StructuredSummary): ConceptCard[] 
   }));
 }
 
+const CLAUDE_MODELS = [
+  ANTHROPIC_MODEL,
+  ANTHROPIC_FALLBACK_MODEL,
+  'claude-sonnet-5',
+  'claude-haiku-5-5',
+];
+
+/** Structured JSON calls: turn off up-front thinking so tokens go to the answer. */
+function structuredCallExtras(model: string) {
+  const isSonnet55 = /sonnet-5-5/i.test(model);
+  return {
+    // Sonnet 5.5 rejects "disabled"; between_tools turns off up-front thinking.
+    thinking: { type: isSonnet55 ? 'between_tools' : 'disabled' },
+    output_config: { effort: 'low' },
+  };
+}
+
 async function callClaude(
   prompt: string,
   maxTokens: number,
@@ -216,34 +233,123 @@ async function callClaude(
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('Claude API key missing. Add VITE_CLAUDE_API_KEY to .env');
 
-  const body = {
-    model: ANTHROPIC_MODEL,
-    max_tokens: maxTokens,
-    ...(system ? { system } : {}),
-    messages: [{ role: 'user' as const, content: prompt }],
-  };
+  let lastErr = '';
 
-  let response = await fetch(CLAUDE_URL, {
-    method: 'POST',
-    headers: buildHeaders(),
-    body: JSON.stringify(body),
-  });
+  for (const model of CLAUDE_MODELS) {
+    const body: Record<string, unknown> = {
+      model,
+      max_tokens: maxTokens,
+      ...structuredCallExtras(model),
+      ...(system ? { system } : {}),
+      messages: [{ role: 'user' as const, content: prompt }],
+    };
 
-  if (!response.ok && response.status === 404) {
-    response = await fetch(CLAUDE_URL, {
+    let response = await fetch(CLAUDE_URL, {
       method: 'POST',
       headers: buildHeaders(),
-      body: JSON.stringify({ ...body, model: ANTHROPIC_FALLBACK_MODEL }),
+      body: JSON.stringify(body),
     });
+
+    // Some models reject thinking/effort combos — retry bare request once.
+    if (!response.ok && (response.status === 400 || response.status === 404)) {
+      const errText = await response.text();
+      lastErr = errText;
+      if (/thinking|effort|output_config|not_found|model/i.test(errText)) {
+        response = await fetch(CLAUDE_URL, {
+          method: 'POST',
+          headers: buildHeaders(),
+          body: JSON.stringify({
+            model,
+            max_tokens: maxTokens,
+            ...(system ? { system } : {}),
+            messages: [{ role: 'user' as const, content: prompt }],
+          }),
+        });
+      } else {
+        continue;
+      }
+    }
+
+    if (response.ok) {
+      const data = await response.json();
+      return messageText(data);
+    }
+
+    lastErr = await response.text();
+    // Auth / credit issues — don't keep trying other models
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(
+        `Claude API auth error ${response.status}. Check VITE_CLAUDE_API_KEY in .env.`
+      );
+    }
+    if (response.status === 429) {
+      await new Promise((r) => setTimeout(r, 1200));
+      continue;
+    }
   }
 
-  if (!response.ok) {
-    const errBody = await response.text();
-    throw new Error(`Claude API error ${response.status}: ${errBody}`);
-  }
+  throw new Error(
+    `Claude API unavailable: ${lastErr.slice(0, 280) || 'unknown error'}`
+  );
+}
 
-  const data = await response.json();
-  return messageText(data);
+/** Local extractive summary when Claude is unavailable — grounded, no invention. */
+function extractiveChunkSummary(
+  chunk: DocumentChunk
+): Partial<StructuredSummary> & { topics: TopicSummary[] } {
+  const plain = chunk.text
+    .replace(/\[Page\s+\d+\]/gi, ' ')
+    .replace(/---\s*Page\s+\d+\s*---/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const sentences = plain
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 40 && s.length < 280)
+    .slice(0, 8);
+
+  const title =
+    chunk.headingHint ||
+    `Pages ${chunk.startPage}–${chunk.endPage}`;
+  const pages = Array.from(
+    { length: chunk.endPage - chunk.startPage + 1 },
+    (_, i) => chunk.startPage + i
+  );
+
+  return {
+    topics: [
+      {
+        title,
+        explanation:
+          sentences.slice(0, 4).join(' ') ||
+          plain.slice(0, 500) ||
+          'No extractable text in this chunk.',
+        subtopics: [],
+        definitions: [],
+        formulas: [],
+        procedures: [],
+        examples: [],
+        relationships: [],
+        sourcePages: pages,
+      },
+    ],
+    keyConcepts: sentences
+      .flatMap((s) => s.split(/[^A-Za-z0-9-]+/))
+      .filter((w) => w.length > 5)
+      .slice(0, 6),
+    definitionsAndFormulas: [],
+    takeaways: sentences.slice(0, 3),
+    examRevisionNotes: sentences.slice(0, 2),
+    conceptRelationships: [],
+    topicsToReview: [title],
+    sourceReferences: sentences.slice(0, 2).map((claim) => ({
+      claim,
+      page: chunk.startPage,
+    })),
+    coverageNotes: [
+      'Claude was unavailable for this chunk; showing extractive notes from the PDF text only.',
+    ],
+  };
 }
 
 function detectHeading(text: string): string | undefined {
@@ -335,8 +441,10 @@ Mode: ${mode}
 ${modeInstructions(mode)}
 
 RULES:
-- Use ONLY information from the chunk text below.
+- Use ONLY information from the chunk text below. Do NOT invent concepts, formulas, or page numbers.
 - Include real page numbers from [Page N] markers. NEVER invent page numbers.
+- Prefer concrete definitions, procedures, and examples that appear in the text.
+- If the chunk is mostly titles/headers, summarize what the section is about without fabricating details.
 - Return ONLY valid JSON.
 
 Chunk text:
@@ -348,7 +456,7 @@ JSON schema:
 {
   "topics": [{
     "title": "string",
-    "explanation": "detailed paragraph",
+    "explanation": "detailed paragraph grounded in the chunk",
     "subtopics": ["string"],
     "definitions": ["term: meaning"],
     "formulas": ["string"],
@@ -367,19 +475,28 @@ JSON schema:
   "coverageNotes": ["string"]
 }`;
 
-  const text = await callClaude(prompt, 4096, 'Return ONLY valid JSON. No markdown.');
-  const parsed = safeParseJson<Record<string, any>>(text);
-  return {
-    topics: Array.isArray(parsed.topics) ? parsed.topics : [],
-    keyConcepts: parsed.keyConcepts ?? [],
-    definitionsAndFormulas: parsed.definitionsAndFormulas ?? [],
-    takeaways: parsed.takeaways ?? [],
-    examRevisionNotes: parsed.examRevisionNotes ?? [],
-    conceptRelationships: parsed.conceptRelationships ?? [],
-    topicsToReview: parsed.topicsToReview ?? [],
-    sourceReferences: parsed.sourceReferences ?? [],
-    coverageNotes: parsed.coverageNotes ?? [],
-  };
+  try {
+    const text = await callClaude(prompt, 4096, 'Return ONLY valid JSON. No markdown. Never invent facts.');
+    const parsed = safeParseJson<Record<string, any>>(text);
+    const topics = Array.isArray(parsed.topics) ? parsed.topics : [];
+    if (!topics.length && !(parsed.takeaways?.length)) {
+      return extractiveChunkSummary(chunk);
+    }
+    return {
+      topics,
+      keyConcepts: parsed.keyConcepts ?? [],
+      definitionsAndFormulas: parsed.definitionsAndFormulas ?? [],
+      takeaways: parsed.takeaways ?? [],
+      examRevisionNotes: parsed.examRevisionNotes ?? [],
+      conceptRelationships: parsed.conceptRelationships ?? [],
+      topicsToReview: parsed.topicsToReview ?? [],
+      sourceReferences: parsed.sourceReferences ?? [],
+      coverageNotes: parsed.coverageNotes ?? [],
+    };
+  } catch (err) {
+    console.warn(`[Summary] Claude chunk failed, using extractive fallback for ${chunk.id}`, err);
+    return extractiveChunkSummary(chunk);
+  }
 }
 
 function mergePartial(
@@ -498,8 +615,9 @@ Return ONLY valid JSON with this schema:
 
 Rules:
 - Preserve real source page numbers only; never invent pages.
-- Keep ALL major topics represented.
-- Organize by document structure.`;
+- Keep ALL major topics represented; do not invent topics, formulas, or claims absent from the draft.
+- Organize by document structure.
+- Overview must describe the draft content only.`;
 
   try {
     const text = await callClaude(prompt, 8192, 'Return ONLY valid JSON.');
@@ -571,7 +689,12 @@ export async function generateDocumentSummary(
       } catch (err) {
         console.warn(`[Summary] Chunk ${chunk.id} attempt ${attempt + 1} failed`, err);
         if (attempt === MAX_RETRIES) {
-          for (let p = chunk.startPage; p <= chunk.endPage; p++) pagesFailed.push(p);
+          // Last resort: always keep grounded extractive notes so the UI is never empty
+          parts.push(extractiveChunkSummary(chunk));
+          for (let p = chunk.startPage; p <= chunk.endPage; p++) {
+            pagesCovered.add(p);
+            pagesFailed.push(p);
+          }
         }
       }
     }
@@ -580,13 +703,15 @@ export async function generateDocumentSummary(
         stage: 'summarizing',
         current: i + 1,
         total: chunks.length,
-        message: `Failed pages ${chunk.startPage}–${chunk.endPage} after retries`,
+        message: `Used extractive notes for pages ${chunk.startPage}–${chunk.endPage}`,
       });
     }
   }
 
   if (parts.length === 0) {
-    throw new Error('All chunks failed to summarize. Check your Claude API key and try again.');
+    throw new Error(
+      'Could not summarize this document. Re-upload the PDF or check your Claude API key in .env.'
+    );
   }
 
   onProgress?.({
@@ -830,6 +955,60 @@ Rules:
   }));
 }
 
+type PracticeItem = {
+  id: string;
+  type: string;
+  question: string;
+  options?: string[];
+  correctAnswer: string;
+  explanation: string;
+  sourceTopic?: string;
+  sourcePage?: number;
+};
+
+const BANNED_PRACTICE = [
+  /---\s*page/i,
+  /\[page\s*\d+\]/i,
+  /according to the study material:\s*"/i,
+  /is a correct statement/i,
+  /is a false statement/i,
+  /is not mentioned/i,
+  /is partially true/i,
+];
+
+function isGoodPracticeItem(q: PracticeItem): boolean {
+  if (!q?.question || q.question.trim().length < 20) return false;
+  if (!q.correctAnswer || String(q.correctAnswer).trim().length < 1) return false;
+  if (BANNED_PRACTICE.some((re) => re.test(`${q.question} ${q.correctAnswer} ${(q.options || []).join(' ')}`))) {
+    return false;
+  }
+  const type = (q.type || '').toLowerCase();
+  if (type.includes('multiple') || (q.options && q.options.length > 0)) {
+    if (!q.options || q.options.length < 2) return false;
+    if (!q.options.includes(q.correctAnswer) && !q.options.some((o) => o.trim() === q.correctAnswer.trim())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function groundedPracticeFallback(
+  document: StudyDocument,
+  count: number
+): Promise<PracticeItem[]> {
+  const { generateFallbackQuiz } = await import('./quizService');
+  const raw = await generateFallbackQuiz(document.rawText || '', count);
+  return raw.map((q) => ({
+    id: q.id,
+    type: 'multiple_choice',
+    question: q.question,
+    options: q.options,
+    correctAnswer: q.correctAnswer,
+    explanation: q.explanation || 'Grounded in your uploaded notes.',
+    sourceTopic: q.sourceTopic || 'Content review',
+  }));
+}
+
 export async function generatePracticeFromDocument(
   document: StudyDocument,
   opts: {
@@ -838,23 +1017,19 @@ export async function generatePracticeFromDocument(
     count?: number;
     types?: string[];
   }
-): Promise<
-  {
-    id: string;
-    type: string;
-    question: string;
-    options?: string[];
-    correctAnswer: string;
-    explanation: string;
-    sourceTopic?: string;
-    sourcePage?: number;
-  }[]
-> {
+): Promise<PracticeItem[]> {
   const pages = parsePagedText(document.rawText || '');
   const sample = pages
     .filter((p) => p.text.trim().length > 40)
     .slice(0, 25)
-    .map((p) => `[Page ${p.page}] ${p.text.slice(0, 700)}`)
+    .map((p) => {
+      const cleaned = p.text
+        .replace(/---\s*Page\s+\d+\s*---/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 700);
+      return `[Page ${p.page}] ${cleaned}`;
+    })
     .join('\n');
 
   const count = opts.count ?? 5;
@@ -864,7 +1039,11 @@ export async function generatePracticeFromDocument(
     : ['multiple_choice', 'short_answer', 'concept_explanation', 'true_false'];
   const topics = opts.topics?.length ? opts.topics.join(', ') : 'all major topics in the material';
 
-  const prompt = `Generate a practice exam from the student's uploaded study material.
+  if (sample.replace(/\s+/g, ' ').trim().length < 80) {
+    return groundedPracticeFallback(document, count);
+  }
+
+  const prompt = `Generate a practice exam STRICTLY from the student's uploaded study material.
 Document: ${document.fileName}
 Topics to focus on: ${topics}
 Difficulty: ${difficulty}
@@ -880,36 +1059,56 @@ Return ONLY JSON array:
 [{
   "id":"q1",
   "type":"multiple_choice|short_answer|concept_explanation|application|true_false|problem_solving",
-  "question":"",
-  "options":["A","B","C","D"],
-  "correctAnswer":"",
-  "explanation":"",
-  "sourceTopic":"",
+  "question":"Complete interrogative sentence ending with ?",
+  "options":["specific option A","specific option B","specific option C","specific option D"],
+  "correctAnswer":"must exactly match one option for MCQ",
+  "explanation":"brief reason grounded in the material",
+  "sourceTopic":"short topic name from the material",
   "sourcePage":1
 }]
 
-Rules:
-- Ground every question in the uploaded material.
-- For multiple_choice include 4 options.
+Hard rules:
+- Ground every question in a real fact/concept from the excerpts above.
+- Questions must be real questions (end with ?), never paste titles, filenames, or "[Page N]" markers.
+- For multiple_choice: exactly 4 DISTINCT plausible options about the content. NEVER use "Is a correct statement", "Is a false statement", "Is not mentioned", or "Is partially true".
+- Never invent formulas, names, or procedures that are not in the excerpts.
 - Never claim these are real exam questions.
 - Use real sourcePage when possible.`;
 
-  const text = await callClaude(prompt, 5000, 'Return ONLY a complete JSON array. Keep questions concise.');
-  const parsed = safeParseJson(text);
-  const list = Array.isArray(parsed)
-    ? parsed
-    : (parsed as { questions?: unknown[] })?.questions || [];
-  if (!Array.isArray(list)) return [];
-  return list.slice(0, count) as {
-    id: string;
-    type: string;
-    question: string;
-    options?: string[];
-    correctAnswer: string;
-    explanation: string;
-    sourceTopic?: string;
-    sourcePage?: number;
-  }[];
+  try {
+    const text = await callClaude(
+      prompt,
+      5000,
+      'Return ONLY a complete JSON array. Keep questions concise. Never invent facts or use placeholder options.'
+    );
+    const parsed = safeParseJson(text);
+    const list = Array.isArray(parsed)
+      ? parsed
+      : (parsed as { questions?: unknown[] })?.questions || [];
+    if (!Array.isArray(list)) {
+      return groundedPracticeFallback(document, count);
+    }
+
+    const accepted = (list as PracticeItem[])
+      .map((q, i) => ({
+        ...q,
+        id: q.id || `q${i + 1}`,
+        type: q.type || 'multiple_choice',
+        explanation: q.explanation || '',
+        correctAnswer: String(q.correctAnswer ?? ''),
+        question: String(q.question ?? ''),
+      }))
+      .filter(isGoodPracticeItem);
+
+    if (accepted.length < count) {
+      const topUp = await groundedPracticeFallback(document, count - accepted.length);
+      return [...accepted, ...topUp].slice(0, count);
+    }
+    return accepted.slice(0, count);
+  } catch (err) {
+    console.warn('[Practice] Claude generation failed, using grounded fallback', err);
+    return groundedPracticeFallback(document, count);
+  }
 }
 
 export function summaryToMarkdown(

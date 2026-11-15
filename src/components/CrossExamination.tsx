@@ -38,7 +38,18 @@ const MOCK_FAIL_EVAL: DefenseEvaluation = {
 
 type Phase = 'pick' | 'follow-up' | 'loading-followup' | 'defense' | 'evaluating' | 'verdict';
 
-export const CrossExamination: React.FC = () => {
+interface CrossExaminationProps {
+  /** When set, auto-starts a cross-exam on this topic (from the readiness path coach). */
+  launchTopic?: string | null;
+  onLaunchConsumed?: () => void;
+  highlightTopic?: string | null;
+}
+
+export const CrossExamination: React.FC<CrossExaminationProps> = ({
+  launchTopic = null,
+  onLaunchConsumed,
+  highlightTopic = null,
+}) => {
   const weakAreas = useStore((s) => s.weakAreas ?? []);
   const adjustReadinessScore = useStore((s) => s.adjustReadinessScore);
   const addCrossExamRecord = useStore((s) => s.addCrossExamRecord);
@@ -58,6 +69,7 @@ export const CrossExamination: React.FC = () => {
   const defenseRef = useRef<HTMLTextAreaElement>(null);
   const verdictRef = useRef<HTMLDivElement>(null);
   const verdictTimerRef = useRef<number | null>(null);
+  const launchHandledRef = useRef<string | null>(null);
 
   // Load mistakes from Firebase on mount
   useEffect(() => {
@@ -91,22 +103,28 @@ export const CrossExamination: React.FC = () => {
     clearVerdictTimer();
 
     try {
-      // Pick a real mistake from the vault
-      const options = mistakeVault[topic] || [];
-      const mistake = options.length > 0 
+      // Pick a real mistake from the vault (skip junk placeholder answers)
+      const junkAnswer = /^(is a correct statement|is a false statement|is not mentioned|is partially true|true|false|[a-d])$/i;
+      const options = (mistakeVault[topic] || []).filter(
+        (m) =>
+          m.question?.trim().length > 15 &&
+          m.userAnswer?.trim().length > 0 &&
+          !junkAnswer.test(m.userAnswer.trim())
+      );
+      const mistake = options.length > 0
         ? options[Math.floor(Math.random() * options.length)]
         : null;
 
-      const entry: TopicData = mistake 
+      const entry: TopicData = mistake
         ? {
             question: mistake.question,
             pastAnswer: mistake.userAnswer,
-            depthScore: 4.5 // Default starting depth for mistake probing
+            depthScore: 4.5,
           }
         : {
-            question: `Explain the fundamental concepts of ${topic}.`,
-            pastAnswer: `${topic} is a key topic that I have been studying in this course.`,
-            depthScore: 4
+            question: `What are the key ideas in “${topic}”, and how would you apply them in practice?`,
+            pastAnswer: `I'm still unsure about “${topic}” and couldn't explain it clearly last time.`,
+            depthScore: 4,
           };
 
       setActiveMistake(entry);
@@ -114,9 +132,9 @@ export const CrossExamination: React.FC = () => {
 
       let fu: FollowUpResult;
 
+      // Use local `entry` — React state from setActiveMistake is still stale here.
       if (USE_MOCK_MODE) {
         await new Promise((r) => setTimeout(r, 1200));
-        const entry = activeMistake || { question: "", pastAnswer: "", depthScore: 4 };
         fu = {
             followup_question: `[MOCK] Can you explain more precisely why ${topic} is considered a fundamental challenge?`,
             weak_point_targeted: 'Depth of conceptual understanding',
@@ -125,7 +143,6 @@ export const CrossExamination: React.FC = () => {
             score_if_failed: Math.max(entry.depthScore - 2, 0),
           };
       } else {
-        const entry = activeMistake || { question: "", pastAnswer: "", depthScore: 4 };
         fu = await generateFollowUp(entry.question, entry.pastAnswer, entry.depthScore);
       }
 
@@ -136,6 +153,19 @@ export const CrossExamination: React.FC = () => {
       setPhase('pick');
     }
   };
+
+  // Auto-launch from readiness path coach
+  useEffect(() => {
+    if (!launchTopic) {
+      launchHandledRef.current = null;
+      return;
+    }
+    if (launchHandledRef.current === launchTopic) return;
+    if (phase === 'loading-followup' || phase === 'evaluating') return;
+    launchHandledRef.current = launchTopic;
+    void handleTopicSelect(launchTopic).finally(() => onLaunchConsumed?.());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [launchTopic]);
 
   const handleSubmitDefense = async () => {
     if (!defenseText.trim() || !followUpData || !activeMistake) return;
@@ -296,7 +326,7 @@ export const CrossExamination: React.FC = () => {
               {weakAreas.map((area: string, idx: number) => (
                 <button
                   key={`${area}-${idx}`}
-                  className="pick-topic-btn"
+                  className={`pick-topic-btn${highlightTopic === area ? ' pick-topic-btn--focus' : ''}`}
                   onClick={() => handleTopicSelect(area)}
                 >
                   <span className="pick-topic-icon">⚡</span>
@@ -323,33 +353,56 @@ export const CrossExamination: React.FC = () => {
               <span className="gap-tag">⚠ {selectedTopic}</span>
             </div>
 
-            <div className="past-answer-group">
-              <p className="section-micro-label">Your past answer</p>
-              <blockquote className="past-answer-box">{activeMistake.pastAnswer}</blockquote>
-            </div>
-
-            <div className="follow-up-card">
-              <div className="follow-up-header">
-                <span className="claude-avatar">✦</span>
-                <span className="follow-up-label">Claude&apos;s follow-up</span>
+            <div className="cx-review-stack">
+              <div className="cx-block cx-block--question">
+                <p className="section-micro-label">1 · The question</p>
+                <p className="cx-question-text">{activeMistake.question}</p>
               </div>
-              <p className="follow-up-question">{followUpData.followup_question}</p>
-              <p className="weak-point-targeted">
-                <em>Probing:</em> {followUpData.weak_point_targeted}
-              </p>
+
+              <div className="cx-block cx-block--answer">
+                <p className="section-micro-label">2 · Your answer</p>
+                <blockquote className="past-answer-box">{activeMistake.pastAnswer}</blockquote>
+              </div>
+
+              <div className="follow-up-card cx-block--probe">
+                <div className="follow-up-header">
+                  <span className="claude-avatar">✦</span>
+                  <span className="follow-up-label">3 · Explain — Claude&apos;s follow-up</span>
+                </div>
+                <p className="follow-up-question">{followUpData.followup_question}</p>
+                {followUpData.weak_point_targeted && (
+                  <p className="weak-point-targeted">
+                    <em>Why this probe:</em> {followUpData.weak_point_targeted}
+                  </p>
+                )}
+                {Array.isArray(followUpData.deep_answer_covers) &&
+                  followUpData.deep_answer_covers.length > 0 && (
+                    <div className="cx-cover-list">
+                      <p className="section-micro-label">A strong explanation should cover</p>
+                      <ul>
+                        {followUpData.deep_answer_covers.map((item, i) => (
+                          <li key={i}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+              </div>
             </div>
 
             {(phase === 'follow-up' || phase === 'defense') && (
               <div className="defense-group">
                 <label className="section-micro-label" htmlFor="defense-input">
-                  Your defense answer
+                  4 · Your explanation / defense
                 </label>
+                <p className="cx-defense-hint">
+                  Re-read the question and your answer above, then explain the idea clearly in your own words.
+                </p>
                 <textarea
                   id="defense-input"
                   ref={defenseRef}
                   className="defense-textarea"
                   rows={5}
-                  placeholder="Explain your reasoning in depth…"
+                  placeholder="Explain what the question was asking, why your answer was right or wrong, and the deeper reasoning…"
                   value={defenseText}
                   onChange={(e) => {
                     setDefenseText(e.target.value);
