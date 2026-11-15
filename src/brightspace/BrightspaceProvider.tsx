@@ -14,9 +14,49 @@ import {
   type CourseSelection,
   type ImportEvent,
   type SelectedMaterial,
+  type OfficialFinalsResult,
+  type UpcomingDatesResult,
   type UsedMaterials,
 } from './brightspaceContext';
-import { courseContentEndpoint, courseImportEndpoint, toCourseContent, toImportEvent } from './contentApi';
+import {
+  OFFICIAL_FINALS_ENDPOINT,
+  UPCOMING_DATES_ENDPOINT,
+  courseContentEndpoint,
+  courseImportEndpoint,
+  toCourseContent,
+  toImportEvent,
+  toOfficialFinals,
+  toUpcomingDates,
+} from './contentApi';
+
+const UNREACHABLE = 'The local connector isn’t reachable. Start it with `npm run server`.';
+
+/** GET a connector JSON endpoint; returns the parsed body or a failure in UI terms. */
+async function getConnectorJson(
+  user: User,
+  endpoint: string,
+  signal: AbortSignal | undefined,
+  staleMessage: string,
+): Promise<{ ok: true; json: Record<string, unknown> } | { ok: false; code: string; message: string }> {
+  let res: Response;
+  let json: unknown = null;
+  try {
+    const token = await user.getIdToken();
+    res = await fetch(endpoint, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal });
+    json = await readJson(res);
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    return { ok: false, code: 'unreachable', message: UNREACHABLE };
+  }
+  if (!json || typeof json !== 'object') return { ok: false, code: 'unreachable', message: UNREACHABLE };
+  if (res.ok) return { ok: true, json: json as Record<string, unknown> };
+  const err = ((json as Record<string, unknown>).error ?? {}) as Record<string, unknown>;
+  const code = asString(err.code, `http_${res.status}`);
+  const message = code === 'not_owner' ? NOT_OWNER_MESSAGE
+    : code === 'not_found' ? staleMessage
+    : asString(err.message, 'The connector returned an error.');
+  return { ok: false, code, message };
+}
 
 // Proxied by the Vite dev server to the localhost-only connector (server/index.ts).
 const CONNECT_ENDPOINT = '/local-api/brightspace/connect';
@@ -262,6 +302,24 @@ const Inner: React.FC<{ user: User; children: React.ReactNode }> = ({ user, chil
     return { ok: false, kind: 'error', code, message };
   }, []);
 
+  const fetchUpcomingDates = useCallback(async (signal?: AbortSignal): Promise<UpcomingDatesResult> => {
+    const r = await getConnectorJson(userRef.current, UPCOMING_DATES_ENDPOINT, signal, 'The running connector predates Brightspace dates. Restart `npm run server`.');
+    if (!r.ok) return r;
+    const dates = toUpcomingDates(r.json);
+    return dates
+      ? { ok: true, dates, retrievedAt: asString(r.json.retrievedAt, new Date().toISOString()) }
+      : { ok: false, code: 'bad_response', message: 'The connector returned dates in an unexpected format.' };
+  }, []);
+
+  const fetchOfficialFinals = useCallback(async (signal?: AbortSignal): Promise<OfficialFinalsResult> => {
+    const r = await getConnectorJson(userRef.current, OFFICIAL_FINALS_ENDPOINT, signal, 'The running connector predates official finals. Restart `npm run server`.');
+    if (!r.ok) return r;
+    const parsed = toOfficialFinals(r.json);
+    return parsed
+      ? { ok: true, ...parsed }
+      : { ok: false, code: 'bad_response', message: 'The connector returned final exam data in an unexpected format.' };
+  }, []);
+
   /**
    * Stream an import from the connector. Errors before the stream starts
    * (access, identity, busy) arrive as a single `error` event.
@@ -344,8 +402,8 @@ const Inner: React.FC<{ user: User; children: React.ReactNode }> = ({ user, chil
   }, [method, status, wasConnected, available, resolving]);
 
   const value = useMemo<BrightspaceContextValue>(
-    () => ({ connection, status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials, importMaterials }),
-    [connection, status, connect, fetchCourseContent, selections, setCourseSelection, usedMaterials, saveUsedMaterials, importMaterials],
+    () => ({ connection, status, connect, fetchCourseContent, fetchUpcomingDates, fetchOfficialFinals, selections, setCourseSelection, usedMaterials, saveUsedMaterials, importMaterials }),
+    [connection, status, connect, fetchCourseContent, fetchUpcomingDates, fetchOfficialFinals, selections, setCourseSelection, usedMaterials, saveUsedMaterials, importMaterials],
   );
   return <BrightspaceContext.Provider value={value}>{children}</BrightspaceContext.Provider>;
 };
@@ -355,6 +413,8 @@ const SIGNED_OUT_VALUE: BrightspaceContextValue = {
   status: { kind: 'idle' },
   connect: () => undefined,
   fetchCourseContent: async () => ({ ok: false, kind: 'error', code: 'signed_out', message: 'Sign in to TrojanMind first.' }),
+  fetchUpcomingDates: async () => ({ ok: false, code: 'signed_out', message: 'Sign in to TrojanMind first.' }),
+  fetchOfficialFinals: async () => ({ ok: false, code: 'signed_out', message: 'Sign in to TrojanMind first.' }),
   selections: {},
   setCourseSelection: () => undefined,
   usedMaterials: {},

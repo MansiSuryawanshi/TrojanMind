@@ -1,4 +1,4 @@
-import type { ContentModule, ContentTopic, CourseContent, ImportEvent, SourceType } from './brightspaceContext';
+import type { ContentModule, ContentTopic, CourseContent, ImportEvent, OfficialFinal, SourceType, UpcomingDate } from './brightspaceContext';
 
 /** Proxied by the Vite dev server to the localhost-only connector (server/index.ts). */
 export const courseContentEndpoint = (courseId: number) => `/local-api/brightspace/courses/${courseId}/content`;
@@ -37,7 +37,7 @@ export function toImportEvent(v: unknown): ImportEvent | null {
       // "imported" with no text is not an import.
       status: status === 'imported' && !text ? 'failed' : status,
       reason: status === 'imported' && !text ? 'empty' : strOrNull(i.reason),
-      method: i.method === 'download_file' || i.method === 'page_body' ? i.method : null,
+      method: i.method === 'download_file' || i.method === 'page_body' || i.method === 'google_export' ? i.method : null,
       text,
       truncated: i.truncated === true,
       pages: typeof i.pages === 'number' ? i.pages : null,
@@ -64,14 +64,16 @@ export const IMPORT_REASON_TEXT: Record<string, string> = {
   empty: 'The file came back with no text.',
   interrupted: 'Not retrieved: the import was interrupted before this item.',
   save_failed: 'Retrieved, but saving it to your history failed. Import it again.',
+  not_shared: 'This Google item isn’t shared publicly. Set sharing to “Anyone with the link can view” (or open it and paste its text), then import again.',
+  google_unreachable: 'Couldn’t reach Google for this item. Try importing it again.',
   unknown: 'Brightspace couldn’t return this file’s text.',
 };
 
 /** What remains unavailable for a link-only source type. */
 export const LINK_ONLY_NOTE: Partial<Record<SourceType, string>> = {
-  google_drive_folder: 'Google Drive folders aren’t opened or listed. Open the folder and upload or paste the documents you need.',
-  google_drive_file: 'Google Drive files aren’t downloaded. Open it, then upload or paste its text.',
-  google_doc: 'Google Docs / Sheets / Slides aren’t retrieved. Open it, then upload or paste its text.',
+  google_drive_folder: 'This Drive folder link couldn’t be read. Open the folder and upload or paste the documents you need.',
+  google_drive_file: 'This Drive file link couldn’t be read. Open it, then upload or paste its text.',
+  google_doc: 'Google Forms aren’t retrieved. Open it, then paste the relevant text.',
   recording_lti: 'Recordings and LTI tools aren’t transcribed here. Open it in Brightspace, or paste notes or a transcript.',
   external_link: 'External websites aren’t fetched. Open it, then paste the relevant text.',
   brightspace_page: 'This Brightspace link has no readable body. Open it, then paste the relevant text.',
@@ -158,6 +160,70 @@ export function toCourseContent(body: unknown, courseId: number): CourseContent 
   };
 }
 
+export const UPCOMING_DATES_ENDPOINT = '/local-api/brightspace/upcoming';
+
+/** Validate GET /brightspace/upcoming items; drops anything malformed. */
+export function toUpcomingDates(body: unknown): UpcomingDate[] | null {
+  if (!body || typeof body !== 'object' || !Array.isArray((body as Record<string, unknown>).dates)) return null;
+  const out: UpcomingDate[] = [];
+  for (const v of (body as { dates: unknown[] }).dates) {
+    if (!v || typeof v !== 'object') continue;
+    const r = v as Record<string, unknown>;
+    if (typeof r.id !== 'string' || typeof r.title !== 'string' || typeof r.date !== 'string' || Number.isNaN(Date.parse(r.date))) continue;
+    out.push({
+      id: r.id,
+      source: typeof r.source === 'string' ? r.source : 'event',
+      kind: r.kind === 'exam' || r.kind === 'quiz' ? r.kind : 'other',
+      title: r.title,
+      courseId: typeof r.courseId === 'number' ? r.courseId : null,
+      courseName: strOrNull(r.courseName),
+      date: r.date,
+      url: safeHttpUrl(r.url),
+    });
+  }
+  return out;
+}
+
+export const OFFICIAL_FINALS_ENDPOINT = '/local-api/brightspace/official-finals';
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const HHMM = /^\d{2}:\d{2}$/;
+
+/** Validate GET /brightspace/official-finals; null if the shape is wrong. */
+export function toOfficialFinals(body: unknown): { finals: OfficialFinal[]; sources: { termCode: string; label: string; url: string }[] } | null {
+  if (!body || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+  if (!Array.isArray(b.finals)) return null;
+  const finals: OfficialFinal[] = [];
+  for (const v of b.finals) {
+    if (!v || typeof v !== 'object') continue;
+    const r = v as Record<string, unknown>;
+    if (typeof r.courseId !== 'number' || typeof r.courseName !== 'string' || typeof r.courseCode !== 'string' || typeof r.sectionId !== 'string') continue;
+    const e = r.exam as Record<string, unknown> | null | undefined;
+    const exam = e && typeof e.date === 'string' && ISO_DATE.test(e.date) && typeof e.start === 'string' && HHMM.test(e.start)
+      && typeof e.end === 'string' && HHMM.test(e.end) && typeof e.rule === 'string'
+      ? { date: e.date, start: e.start, end: e.end, rule: e.rule }
+      : null;
+    finals.push({
+      courseId: r.courseId,
+      courseName: r.courseName,
+      courseCode: r.courseCode,
+      sectionId: r.sectionId,
+      meeting: strOrNull(r.meeting),
+      exam,
+      reason: strOrNull(r.reason),
+    });
+  }
+  const sources = Array.isArray(b.sources)
+    ? b.sources.flatMap((s) => {
+        const o = s as Record<string, unknown>;
+        const url = safeHttpUrl(o?.url);
+        return url && typeof o.label === 'string' && typeof o.termCode === 'string' ? [{ termCode: o.termCode, label: o.label, url }] : [];
+      })
+    : [];
+  return { finals, sources };
+}
+
 /** Every topic under a module, depth-first, in Brightspace order. */
 export function topicsIn(node: ContentModule): ContentTopic[] {
   const out: ContentTopic[] = [];
@@ -171,9 +237,9 @@ export function topicsIn(node: ContentModule): ContentTopic[] {
 export const SOURCE_TYPE_INFO: Record<SourceType, { label: string; note: string }> = {
   brightspace_file: { label: 'Brightspace file', note: 'A file hosted in Brightspace. Not downloaded.' },
   brightspace_page: { label: 'Brightspace page', note: 'A page inside Brightspace. Its content was not retrieved.' },
-  google_drive_folder: { label: 'Google Drive folder', note: 'A folder link, not an individual document. The files inside were not listed or retrieved.' },
-  google_drive_file: { label: 'Google Drive file', note: 'A single file stored in Google Drive. Not downloaded.' },
-  google_doc: { label: 'Google Doc', note: 'A Google Docs / Sheets / Slides link. Its content was not retrieved.' },
+  google_drive_folder: { label: 'Google Drive folder', note: 'A Drive folder. On import, readable files inside (Docs, PDFs, Word, PowerPoint, text) are retrieved if the folder is link-shared.' },
+  google_drive_file: { label: 'Google Drive file', note: 'A single file in Google Drive. Its text is retrieved on import if it is link-shared.' },
+  google_doc: { label: 'Google Doc', note: 'A Google Docs / Sheets / Slides link. Its text is retrieved on import if the doc is link-shared.' },
   recording_lti: { label: 'Recording / LTI link', note: 'A lecture recording or external tool launch. No transcript was retrieved.' },
   external_link: { label: 'External link', note: 'A link to another website. Its content was not retrieved.' },
   unavailable: { label: 'No openable link', note: 'Brightspace provided no safe http(s) link for this item.' },

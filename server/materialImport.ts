@@ -7,9 +7,13 @@
  * touched, only through the connector's documented tools:
  *  - Brightspace file topics           → download_file { courseId, topicId }   (inline text)
  *  - course files linked in a module   → download_file { courseId, coursePath } (inline text)
- *  - Brightspace HTML pages            → the topic's own body from get_course_content
- * Everything else (Google Drive/Docs, recordings/LTI, external sites) is kept
- * as a reference only: no URL is ever fetched or crawled.
+ *  - Brightspace HTML pages            → the topic's own body from get_course_content,
+ *                                        plus any Google Docs embedded or linked in it
+ *  - Google Docs / Sheets / Slides     → plain-text export from docs.google.com
+ *                                        (link-shared or published docs only; see googleDocs.ts)
+ *  - Google Drive files and folders    → download / public folder listing (see googleDrive.ts)
+ * Everything else (Forms, recordings/LTI, external
+ * sites) is kept as a reference only: those URLs are never fetched or crawled.
  */
 import {
   downloadCourseFileText,
@@ -22,6 +26,8 @@ import {
   type RetrievalFailure,
   type SourceType,
 } from './brightspaceMcp.ts';
+import { fetchDriveFileText, fetchDriveFolderText, parseDriveFileId, parseDriveFolderId } from './googleDrive.ts';
+import { fetchGoogleDocText, googleDocsInHtml, parseGoogleDocUrl, type GoogleDocRef, type GoogleFailure } from './googleDocs.ts';
 
 /** Most items accepted in one import request. */
 export const MAX_IMPORT_ITEMS = 25;
@@ -37,8 +43,9 @@ export type ItemStatus = 'imported' | 'link_only' | 'failed';
  *  - 'not_available'    : hidden, locked, or not yet available in Brightspace
  *  - 'not_in_course'    : the key isn't in the course's current content
  *  - 'no_page_body'     : Brightspace page with no body the connector returns
+ *  - GoogleFailure codes from the Google Docs export
  */
-export type ItemReason = RetrievalFailure | 'reference_only' | 'not_available' | 'not_in_course' | 'no_page_body';
+export type ItemReason = RetrievalFailure | GoogleFailure | 'reference_only' | 'not_available' | 'not_in_course' | 'no_page_body';
 
 export interface ImportItemResult {
   index: number;
@@ -51,7 +58,7 @@ export interface ImportItemResult {
   status: ItemStatus;
   reason: ItemReason | null;
   /** How the text was obtained, when it was. */
-  method: 'download_file' | 'page_body' | null;
+  method: 'download_file' | 'page_body' | 'google_export' | null;
   text: string | null;
   truncated: boolean;
   pages: number | null;
@@ -100,6 +107,9 @@ type Plan =
   | { kind: 'topic_file'; topicId: number }
   | { kind: 'course_file'; coursePath: string }
   | { kind: 'page_body'; html: string }
+  | { kind: 'google_doc'; ref: GoogleDocRef }
+  | { kind: 'drive_file'; id: string }
+  | { kind: 'drive_folder'; id: string }
   | { kind: 'skip'; status: ItemStatus; reason: ItemReason };
 
 export function planFor(loc: Located, inlineHtml: Map<number, string>): Plan {
@@ -121,8 +131,20 @@ export function planFor(loc: Located, inlineHtml: Map<number, string>): Plan {
       const html = t.id !== null ? inlineHtml.get(t.id) : undefined;
       return html ? { kind: 'page_body', html } : { kind: 'skip', status: 'link_only', reason: 'no_page_body' };
     }
+    case 'google_doc': {
+      const ref = parseGoogleDocUrl(t.url);
+      return ref ? { kind: 'google_doc', ref } : { kind: 'skip', status: 'link_only', reason: 'reference_only' };
+    }
+    case 'google_drive_file': {
+      const id = parseDriveFileId(t.url);
+      return id ? { kind: 'drive_file', id } : { kind: 'skip', status: 'link_only', reason: 'reference_only' };
+    }
+    case 'google_drive_folder': {
+      const id = parseDriveFolderId(t.url);
+      return id ? { kind: 'drive_folder', id } : { kind: 'skip', status: 'link_only', reason: 'reference_only' };
+    }
     default:
-      // Google Drive / Docs, recordings & LTI, external sites, no link.
+      // Google Forms, recordings & LTI, external sites, no link.
       return { kind: 'skip', status: 'link_only', reason: 'reference_only' };
   }
 }
@@ -162,8 +184,31 @@ export async function importOne(
   const plan = planFor(loc, inlineHtml);
   if (plan.kind === 'skip') return { ...b, status: plan.status, reason: plan.reason, ...none };
 
+  if (plan.kind === 'google_doc') {
+    const res = await fetchGoogleDocText(plan.ref);
+    if (!res.ok) return { ...b, status: 'failed', reason: res.reason, ...none };
+    const truncated = res.truncated || res.text.length > MAX_ITEM_CHARS;
+    return { ...b, status: 'imported', reason: null, method: 'google_export', text: truncated ? res.text.slice(0, MAX_ITEM_CHARS) : res.text, truncated, pages: null };
+  }
+
+  if (plan.kind === 'drive_file' || plan.kind === 'drive_folder') {
+    const res = plan.kind === 'drive_file' ? await fetchDriveFileText(plan.id) : await fetchDriveFolderText(plan.id, MAX_ITEM_CHARS);
+    if (!res.ok) return { ...b, status: 'failed', reason: res.reason, ...none };
+    const truncated = res.truncated || res.text.length > MAX_ITEM_CHARS;
+    return { ...b, status: 'imported', reason: null, method: 'google_export', text: truncated ? res.text.slice(0, MAX_ITEM_CHARS) : res.text, truncated, pages: null };
+  }
+
   if (plan.kind === 'page_body') {
-    const text = htmlToText(plan.html);
+    let text = htmlToText(plan.html);
+    // Google Docs embedded (iframe) or linked in the page: append their text.
+    for (const ref of googleDocsInHtml(plan.html)) {
+      const doc = await fetchGoogleDocText(ref);
+      if (doc.ok) text += `
+
+--- Embedded Google ${ref.kind === 'document' ? 'Doc' : ref.kind === 'spreadsheets' ? 'Sheet' : 'Slides'} ---
+${doc.text}`;
+    }
+    text = text.trim();
     if (!text) return { ...b, status: 'failed', reason: 'empty', ...none };
     const truncated = text.length > MAX_ITEM_CHARS;
     return { ...b, status: 'imported', reason: null, method: 'page_body', text: truncated ? text.slice(0, MAX_ITEM_CHARS) : text, truncated, pages: null };

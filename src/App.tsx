@@ -18,6 +18,7 @@ import { InitialDataLoader } from './components/InitialDataLoader';
 import MyCourses from './components/MyCourses';
 import MyMaterials from './components/MyMaterials';
 import PiazzaAssistant from './components/PiazzaAssistant';
+import AssignmentPopup from './components/AssignmentPopup';
 import './index.css';
 
 const DEMO_SESSION = {
@@ -143,6 +144,7 @@ const App: React.FC = () => {
       <main>
         {activeTab === HOME_TABS.home && (
           <div className="animate-fade-in">
+            <AssignmentPopup />
             {/* "Get Started" mirrors the navbar's Get Started (My Courses). */}
             <Hero onGetStarted={() => navigateFromHome(HOME_TABS.courses)} onExploreFeatures={exploreFeatures} />
             <Features onNavigate={navigateFromHome} />

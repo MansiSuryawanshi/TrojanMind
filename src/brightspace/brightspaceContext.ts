@@ -147,7 +147,7 @@ export interface ImportedItem {
   url: string | null;
   status: 'imported' | 'link_only' | 'failed';
   reason: string | null;
-  method: 'download_file' | 'page_body' | null;
+  method: 'download_file' | 'page_body' | 'google_export' | null;
   text: string | null;
   truncated: boolean;
   pages: number | null;
@@ -160,7 +160,48 @@ export type ImportEvent =
   /** Fatal: the import stopped. Items already received are kept. */
   | { type: 'error'; code: string; message: string };
 
+// ── Upcoming dates (mirrors server/brightspaceMcp.ts) ───────────────────────
+
+export type DateKind = 'exam' | 'quiz' | 'other';
+
+export interface UpcomingDate {
+  id: string;
+  source: string;
+  kind: DateKind;
+  title: string;
+  courseId: number | null;
+  courseName: string | null;
+  /** ISO 8601 instant. */
+  date: string;
+  url: string | null;
+}
+
+export type UpcomingDatesResult =
+  | { ok: true; dates: UpcomingDate[]; retrievedAt: string }
+  | { ok: false; code: string; message: string };
+
+// ── Official USC final exams (mirrors server/uscFinals.ts) ──────────────────
+
+export interface OfficialFinal {
+  courseId: number;
+  courseName: string;
+  courseCode: string;
+  sectionId: string;
+  meeting: string | null;
+  /** date YYYY-MM-DD; start/end HH:MM (Los Angeles time). */
+  exam: { date: string; start: string; end: string; rule: string } | null;
+  reason: string | null;
+}
+
+export type OfficialFinalsResult =
+  | { ok: true; finals: OfficialFinal[]; sources: { termCode: string; label: string; url: string }[] }
+  | { ok: false; code: string; message: string };
+
 export interface BrightspaceContextValue {
+  /** Official USC final exam slots for the user's current-term courses. */
+  fetchOfficialFinals: (signal?: AbortSignal) => Promise<OfficialFinalsResult>;
+  /** Exams, quizzes and other dated items for the next 90 days, across all courses. */
+  fetchUpcomingDates: (signal?: AbortSignal) => Promise<UpcomingDatesResult>;
   /** Provider-independent summary of this user's connection. */
   connection: BrightspaceConnection;
   /** Detailed local-demo status. Meaningful only when connection.method === 'local_demo'. */

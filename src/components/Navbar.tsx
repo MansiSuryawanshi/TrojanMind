@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, Loader2, LogOut, Menu, X } from 'lucide-reac
 import { useAuth } from '../auth/useAuth';
 import { useBrightspace } from '../brightspace/useBrightspace';
 import { HOME_TABS } from './homeTabs';
+import AssignmentNotifications from './AssignmentNotifications';
 
 interface NavbarProps {
   activeTab: number;
@@ -92,6 +93,7 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
         </div>
 
         <div className="justify-self-end flex items-center gap-2">
+          <AssignmentNotifications />
           <BrightspacePill status={bs} onClick={() => go(HOME_TABS.courses)} />
 
           <button

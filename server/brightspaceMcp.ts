@@ -589,6 +589,77 @@ export async function getCourseContentForImport(courseId: number, origin: string
   return { content, inlineHtml };
 }
 
+// ── Upcoming dates (get_upcoming_due_dates) ─────────────────────────────────
+
+/**
+ * exam  – title names an exam, midterm, final or test
+ * quiz  – a Brightspace quiz, or a title naming a quiz
+ * other – assignments, weekly markers, labs, etc.
+ */
+export type DateKind = 'exam' | 'quiz' | 'other';
+
+export interface UpcomingDate {
+  id: string;
+  /** Brightspace's item type: event | assignment | quiz | discussion. */
+  source: string;
+  kind: DateKind;
+  title: string;
+  courseId: number | null;
+  courseName: string | null;
+  /** ISO 8601 instant (Brightspace's due/end date). */
+  date: string;
+  url: string | null;
+}
+
+const EXAM_TITLE = /\b(exams?|midterms?|mid-terms?|finals?|tests?)\b/i;
+const QUIZ_TITLE = /\bquiz(zes)?\b/i;
+
+export function classifyDate(source: string, title: string): DateKind {
+  if (EXAM_TITLE.test(title)) return 'exam';
+  if (source === 'quiz' || QUIZ_TITLE.test(title)) return 'quiz';
+  return 'other';
+}
+
+/** Validate get_upcoming_due_dates JSON, keeping only the fields TrojanMind shows. */
+export function parseUpcomingDates(result: unknown, origin: string | null): UpcomingDate[] {
+  const blocks = textBlocks(result);
+  if (isErrorResult(result)) throw toolErrorFrom(blocks[0]);
+  if (blocks.length === 0) return [];
+  let data: unknown;
+  try {
+    data = JSON.parse(blocks[0]);
+  } catch {
+    throw toolErrorFrom(blocks[0]);
+  }
+  if (!Array.isArray(data)) throw new ConnectorError('parse', 'Unexpected due-date format from Brightspace.');
+
+  const out: UpcomingDate[] = [];
+  for (const raw of data) {
+    if (!raw || typeof raw !== 'object') continue;
+    const r = raw as Record<string, unknown>;
+    const title = str(r.title);
+    const date = str(r.dueDate) ?? str(r.endDate) ?? str(r.startDate);
+    if (!title || !date || Number.isNaN(Date.parse(date))) continue;
+    const source = str(r.type) ?? 'event';
+    out.push({
+      id: `${source}:${typeof r.id === 'number' || typeof r.id === 'string' ? r.id : out.length}`,
+      source,
+      kind: classifyDate(source, title),
+      title,
+      courseId: typeof r.courseId === 'number' ? r.courseId : null,
+      courseName: str(r.courseName),
+      date,
+      url: resolveSafeUrl(str(r.url), origin),
+    });
+  }
+  return out.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+}
+
+/** Everything due or scheduled in the next `daysAhead` days (connector max 90), calendar events included. */
+export async function getUpcomingDates(origin: string | null, daysAhead = 90): Promise<UpcomingDate[]> {
+  return parseUpcomingDates(await call('get_upcoming_due_dates', { daysAhead }), origin);
+}
+
 // ── File text retrieval (download_file, inline mode) ────────────────────────
 
 /**

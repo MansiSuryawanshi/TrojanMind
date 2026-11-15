@@ -406,7 +406,7 @@ const REVIEW_ORDER: SourceType[] = [
   'brightspace_file', 'brightspace_page', 'google_doc', 'google_drive_file', 'google_drive_folder', 'recording_lti', 'external_link', 'unavailable',
 ];
 
-const RETRIEVABLE: ReadonlySet<SourceType> = new Set(['brightspace_file', 'brightspace_page']);
+const RETRIEVABLE: ReadonlySet<SourceType> = new Set(['brightspace_file', 'brightspace_page', 'google_doc', 'google_drive_file', 'google_drive_folder']);
 
 const ReviewPanel: React.FC<{
   course: Course;
@@ -433,9 +433,9 @@ const ReviewPanel: React.FC<{
         <h2 id="review-title" className="font-bold text-gold-ink text-lg">Selected references ({items.length})</h2>
         <p className="text-sm text-ink mt-1 leading-relaxed">
           These are <strong>links to your selected course materials</strong>. Nothing has been read from them yet.
-          <strong> Import selected materials</strong> retrieves readable text for Brightspace-hosted files and pages
-          ({retrievable} of {items.length} selected) and saves everything to <strong>My Materials</strong>. Google Drive,
-          Google Docs, recordings, and external links are saved as links only.
+          <strong> Import selected materials</strong> retrieves readable text for Brightspace-hosted files and pages and for link-shared Google Docs, Drive files, and Drive folders
+          ({retrievable} of {items.length} selected) and saves everything to <strong>My Materials</strong>. Recordings
+          and external links are saved as links only.
         </p>
         <p className="text-xs text-muted mt-2">Selected {new Date(savedAt).toLocaleTimeString()}</p>
       </div>

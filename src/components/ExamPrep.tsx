@@ -3,6 +3,8 @@ import { ReadinessScore } from './ReadinessScore';
 import { WeakAreas } from './WeakAreas';
 import { CrossExamination } from './CrossExamination';
 import { ReadinessPathCoach } from './ReadinessPathCoach';
+import { BrightspaceExamDates } from './BrightspaceExamDates';
+import { OfficialFinalExams } from './OfficialFinalExams';
 import { useStore } from '../store/store';
 import { saveExamDate } from '../services/firebaseService';
 import { deriveStudentAnalytics, mapStatsToProgress } from '../services/analyticsService';
@@ -73,10 +75,11 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
     if (weakest) setFocusTopic(weakest.name);
   }, [topicProgress, focusTopic]);
 
-  const handleDateChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newDate = e.target.value;
-    if (!newDate) return;
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.value) void applyExamDate(e.target.value);
+  };
 
+  const applyExamDate = async (newDate: string) => {
     const ds = calculateDaysLeft(newDate);
     console.log(`[ExamPrep-SYNC] New Date: ${newDate} (${ds} days)`);
     
@@ -170,6 +173,9 @@ export const ExamPrep: React.FC<ExamPrepProps> = ({
           <span className={`ep-readiness-pill ${pill.cls}`}>{pill.label}</span>
         </div>
       </div>
+
+      <OfficialFinalExams examDate={examDate} onUseDate={(d) => void applyExamDate(d)} />
+      <BrightspaceExamDates examDate={examDate} onUseDate={(d) => void applyExamDate(d)} />
 
       {/* ── Empty state – no challenge data yet ── */}
       {!hasData && (

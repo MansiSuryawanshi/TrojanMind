@@ -31,7 +31,7 @@ export interface WorkspaceItem {
   status: ItemStatus;
   /** Server reason code when there's no text (see server/materialImport.ts). */
   reason: string | null;
-  method: 'download_file' | 'page_body' | null;
+  method: 'download_file' | 'page_body' | 'google_export' | null;
   charCount: number;
   truncated: boolean;
   pages: number | null;

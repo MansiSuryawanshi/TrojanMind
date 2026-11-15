@@ -46,6 +46,7 @@ import {
   getCourseContentForImport,
   getMyCourses,
   getSignedInUniqueName,
+  getUpcomingDates,
   signIn,
   type AuthState,
   type BrightspaceCourse,
@@ -68,6 +69,7 @@ import {
   type ConnectionMethod,
   type ConnectionState,
 } from './connections.ts';
+import { finalsSourceFor, officialFinalFor, supportedTerms, type OfficialFinal } from './uscFinals.ts';
 import { importOne, indexTopics, parseImportKeys, MAX_IMPORT_ITEMS } from './materialImport.ts';
 import { AiRequestError, aiConfigured, forwardToAnthropic, sanitizeAiBody } from './aiProxy.ts';
 
@@ -438,6 +440,28 @@ const server = createServer(async (req, res) => {
       const courses = await trackLocal(uid, loadVerifiedCourses);
       setLocalState(uid, 'connected');
       return send(res, 200, { courses, retrievedAt: new Date().toISOString() }, origin);
+    }
+
+    // Exams, quizzes and other dated items for the next 90 days, across all courses.
+    if (req.method === 'GET' && url.pathname === '/brightspace/upcoming') {
+      const uid = await requireOwner(req);
+      const dates = await trackLocal(uid, async () => {
+        await requireExpectedIdentity();
+        const items = await getUpcomingDates(await getBrightspaceOrigin());
+        await requireExpectedIdentity();
+        return items;
+      });
+      return send(res, 200, { dates, retrievedAt: new Date().toISOString() }, origin);
+    }
+
+    // Official USC final exam slots for the user's current-term courses.
+    if (req.method === 'GET' && url.pathname === '/brightspace/official-finals') {
+      const uid = await requireOwner(req);
+      const courses = await trackLocal(uid, loadVerifiedCourses);
+      const results = await Promise.all(courses.filter((c) => c.canAccess !== false).map(officialFinalFor));
+      const finals = results.filter((f): f is OfficialFinal => f !== null);
+      const sources = supportedTerms().map(finalsSourceFor).filter((s) => s !== null);
+      return send(res, 200, { finals, sources, retrievedAt: new Date().toISOString() }, origin);
     }
 
     // Module/topic tree for one of the user's accessible courses.
